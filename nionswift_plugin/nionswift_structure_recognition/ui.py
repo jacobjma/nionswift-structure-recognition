@@ -1,20 +1,20 @@
 import gettext
 
 import cv2
+import matplotlib
 import numpy as np
 import tensorflow as tf
 from nion.data import xdata_1_0 as xd
 from nion.ui.Widgets import SectionWidget
 from psm.build import regular_polygons
-from psm.graph.graphutils import adjacency2edges, edges2adjacency
-from psm.graph.faces import traverse_perimeter
+from psm.graph.graphutils import adjacency2edges
 from psm.match import RMSD
 from psm.segments import Segments
 from scipy.ndimage.measurements import center_of_mass
 from skimage.measure import label
 from skimage.segmentation import clear_border
+from skimage.transform import rescale
 from tensorflow import keras
-import matplotlib
 
 from .utils import ensemble_reduce, ensemble_expand, standardize_image
 
@@ -95,6 +95,9 @@ class StructureRecognitionSection(SectionWidgetWrapper):
         self._widgets[tag] = check_box
         self._column.add(row)
 
+    def get_data_item(self):
+        return self._document_controller.target_data_item
+
     def get_image_data(self):
         return self._document_controller.target_data_item.xdata.data
 
@@ -110,11 +113,14 @@ class DeepLearningSection(StructureRecognitionSection):
         super().__init__(ui, document_controller, title='Deep Learning', data=data)
 
         self._model = None
+
         self._graph = None
 
         self.add_text_box('Model', 'models/model.json', tag='model')
 
         self.add_text_box('Weights', 'models/weights.h5', tag='weights')
+
+        self.add_text_box('Training Scale [nm]', '0.0039', tag='scale')
 
         self.add_push_button('Load', self.load_model)
 
@@ -125,6 +131,8 @@ class DeepLearningSection(StructureRecognitionSection):
         self.add_text_box('Clear Border', 20, tag='border')
 
         self.add_push_button('Detect Structures', self.show_detected)
+
+        self.add_check_box('Create Point Regions', tag='create_point_regions')
 
         self.add_push_button('Show Density', self.show_density)
 
@@ -145,22 +153,38 @@ class DeepLearningSection(StructureRecognitionSection):
 
         image = self.get_image_data()
 
-        image = standardize_image(image)
+        old_shape = image.shape
+
+        dataitem = self._document_controller.target_data_item
+
+        target_scale = float(self._widgets['scale'].text)
+
+        scale = dataitem.dimensional_calibrations[0].scale
+
+        image = rescale(image, scale / target_scale)
+
+        shape = (np.ceil(np.array(image.shape) / 16) * 16).astype(int)
+
+        transformed_image = np.zeros(shape)
+
+        transformed_image[:image.shape[0], :image.shape[1]] = image
+
+        transformed_image = standardize_image(transformed_image)
 
         if self._widgets['ensemble'].checked:
-            image = ensemble_expand(image)[..., None]
+            transformed_image = ensemble_expand(transformed_image)[..., None]
         else:
-            image = image[None, ..., None]
+            transformed_image = transformed_image[None, ..., None]
 
         with self._graph.as_default():
-            prediction = self._model.predict(image)
+            prediction = self._model.predict(transformed_image)
 
             if self._widgets['ensemble'].checked:
                 prediction = ensemble_reduce(prediction)
             else:
                 prediction = prediction[0]
 
-            return prediction
+            return rescale(prediction, target_scale / scale)[:old_shape[0], :old_shape[1]]
 
     def show_density(self):
         density = self.get_density()
@@ -202,20 +226,34 @@ class DeepLearningSection(StructureRecognitionSection):
     def show_detected(self):
         self.detect()
 
-        centers_rounded = np.round(self._data['centers']).astype(np.int)
-        colors = {0: (255, 0, 0), 1: (0, 255, 0)}
-        size = 10
+        if self._widgets['create_point_regions'].checked:
+            shape = self.get_data_item().xdata.data_shape
 
-        image = self.get_image_color()
+            dataitem = self._document_controller.create_data_item_from_data_and_metadata(self.get_data_item().xdata,
+                                                                                         title='Local Maxima of ' +
+                                                                                               self.get_data_item().title)
 
-        for center, class_id in zip(centers_rounded, self._data['class_ids']):
-            cv2.circle(image, tuple(center), size, colors[class_id], 2)
-            # cv2.circle(image, tuple(center), 3, colors[class_id], 10)
-            # cv2.rectangle(image, tuple(center - size), tuple(center + size), colors[class_id], 1)
+            for center in self._data['centers']:
+                dataitem.add_point_region(center[0] / shape[0], center[1] / shape[1])
 
-        xdata = xd.rgb(image[..., 0], image[..., 1], image[..., 2])
-
-        self._document_controller.create_data_item_from_data_and_metadata(xdata, title='')
+        # self.detect()
+        #
+        #
+        #
+        # centers_rounded = np.round(self._data['centers']).astype(np.int)
+        # colors = {0: (255, 0, 0), 1: (0, 255, 0)}
+        # size = 10
+        #
+        # image = self.get_image_color()
+        #
+        # for center, class_id in zip(centers_rounded, self._data['class_ids']):
+        #     cv2.circle(image, tuple(center), size, colors[class_id], 2)
+        #     # cv2.circle(image, tuple(center), 3, colors[class_id], 10)
+        #     # cv2.rectangle(image, tuple(center - size), tuple(center + size), colors[class_id], 1)
+        #
+        # xdata = xd.rgb(image[..., 0], image[..., 1], image[..., 2])
+        #
+        # self._document_controller.create_data_item_from_data_and_metadata(xdata, title='')
 
 
 class PointSegmentMatchingSection(StructureRecognitionSection):
