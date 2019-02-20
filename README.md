@@ -9,4 +9,4 @@ Requirements
 * SciPy
 * TensorFlow
 * scikit-image
-
+* OpenCV
