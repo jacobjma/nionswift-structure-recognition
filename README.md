@@ -4,7 +4,9 @@ Nion Swift plugin for structure recognition in atomic scale images
 Requirements
 ------------
 
+* Nion Swift
+* Numpy
 * SciPy
-* Tensorflow
-* Scikit-image
+* TensorFlow
+* scikit-image
 
