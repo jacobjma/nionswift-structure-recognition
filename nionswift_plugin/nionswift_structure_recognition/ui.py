@@ -5,6 +5,7 @@ import matplotlib
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
+from skimage.io import imsave
 
 from .graph import stable_delaunay_graph, faces_to_quadedge
 from .utils import gaussian_filter, density2points, rescale, ensemble_expand, ensemble_reduce
@@ -69,7 +70,9 @@ class StructureRecognitionPanelDelegate(object):
 
     def get_target_series_length(self):
         if self.target_data_item.xdata.is_sequence:
-            pass
+            return self.target_data_item.xdata.sequence_dimension_shape
+        elif self.target_data_item.xdata.is_collection:
+            return self.target_data_item.xdata.collection_dimension_shape
 
     def get_target_shape(self):
         return self.target_data_item.xdata.datum_dimension_shape
@@ -109,11 +112,9 @@ class StructureRecognitionPanelDelegate(object):
                 images = tf.convert_to_tensor(self.get_target_image_data()[None, ..., i, None].copy(), dtype=tf.float32)
         else:
             images = tf.convert_to_tensor(self.get_target_image_data()[None, ..., None].copy(), dtype=tf.float32)
-        print("SHAPE:")
-        print(images.shape)
 
         if self.resample_widget.text is not '':
-            scale_factor = float(self.resample_widget.text) / self.target_data_item.dimensional_calibrations[1].scale
+            scale_factor = float(self.resample_widget.text)
         else:
             scale_factor = 1.
 
@@ -131,8 +132,6 @@ class StructureRecognitionPanelDelegate(object):
             normalisation_sigma = float(self.normalization_widget.text)
 
             images = normalize_local(images, normalisation_sigma)
-
-        # print(images)
 
         return images
 
@@ -238,7 +237,18 @@ class StructureRecognitionPanelDelegate(object):
         self.output_data_item.set_data(output_images[0])
 
     def loop_series(self):
-        pass
+        output_stack = np.zeros((self.get_target_series_length()[0],) +
+                                tuple(self.get_target_shape()) + (3,), dtype=np.uint8)
+
+        for i in range(self.get_target_series_length()[0]):
+            print(i)
+            images = self.get_images(i)
+            density, confidence, confidence_region, points = self.get_predictions(images)
+            output_images = self.create_output_images(images, density, confidence, confidence_region, points)
+
+            output_stack[i] = output_images[0]
+
+        imsave('test.tif', output_stack)
 
     def create_panel_widget(self, ui, document_controller):
         self.ui = ui
@@ -265,7 +275,7 @@ class StructureRecognitionPanelDelegate(object):
         self.resample_widget = model_section.add_line_edit('Resample', placeholder_text='No Resampling')
         self.normalization_widget = model_section.add_line_edit('Normalization Sigma', placeholder_text='Use Global')
         self.ensembling_widget = model_section.add_line_edit('Ensemble Size', placeholder_text='No Ensembling')
-        self.integration_threshold_widget = model_section.add_line_edit('Integration Threshold', default_text='.5')
+        self.integration_threshold_widget = model_section.add_line_edit('Integration Threshold', default_text='.3')
 
         #################### Graph ####################
 
@@ -302,6 +312,7 @@ class StructureRecognitionPanelDelegate(object):
         output_section = self.add_section('Output')
         output_section.add_push_button('Set Target Data Item', self.set_target_data_item)
         output_section.add_push_button('New Output Data Item', self.new_output_dataitem)
+        output_section.add_push_button('Output Series', self.loop_series)
 
         # self.predict_series_widget = output_section.add_check_box('Predict Series')
 
