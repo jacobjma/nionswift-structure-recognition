@@ -1,6 +1,5 @@
 import numpy as np
 import scipy
-from sklearn.cluster import KMeans
 
 import tensorflow as tf
 from pomegranate import MultivariateGaussianDistribution, GeneralMixtureModel
@@ -162,7 +161,7 @@ def density2points(density, regions, fit_gaussians=False):
 
     labelled, n = scipy.ndimage.label(regions)
     num_instances = scipy.ndimage.sum(density, labelled, range(0, n + 1))
-    num_instances = np.round(num_instances / np.median(num_instances)).astype(int)
+    num_instances = np.round(1.1 * num_instances / np.median(num_instances)).astype(int)
     unique_num_instances = np.unique(num_instances[1:])
 
     if fit_gaussians:

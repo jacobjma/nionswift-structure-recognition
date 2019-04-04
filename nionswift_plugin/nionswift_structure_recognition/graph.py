@@ -101,10 +101,37 @@ def _order_exterior_vertices(simplices):
     while len(order) < len(edges):
         order += [edges[order[-1]]]
 
-    return order
+    return np.array(order)
 
 
-def stable_delaunay_graph(points, threshold):
+@numba.njit
+def polygon_area(x, y):
+    return (x * (np.roll(y, 1) - np.roll(y, -1))).sum() / 2.0
+
+
+@numba.njit
+def face_areas(points, faces, face_size):
+    areas = np.zeros(len(faces))
+    k = 0
+
+    for i in range(len(faces)):
+        face = points[faces[i, :face_size[i]]]
+        areas[k] = polygon_area(face[:, 1], face[:, 0])
+        k += 1
+
+    return areas
+
+
+def faces_to_quadedge(faces, face_sizes):
+    quadedge = defaultdict(lambda: ())
+    for i in range(len(faces)):
+        for j in range(face_sizes[i]):
+            quadedge[tuple(sorted((faces[i][j], faces[i][(j + 1) % face_sizes[i]])))] += (i,)
+
+    return quadedge
+
+
+def stable_delaunay_graph(points, threshold, remove_hull_adjacent=False, remove_outlier_faces=False):
     delaunay = scipy.spatial.Delaunay(points)
     simplices = delaunay.simplices
     neighbors = delaunay.neighbors
@@ -122,15 +149,67 @@ def stable_delaunay_graph(points, threshold):
 
     outer = set(list(simplices[labels == 0].flatten()))
 
-    faces = []
+    max_face_size = 20
+    faces = np.zeros((len(simplices), max_face_size), dtype=np.int32)
+    face_sizes = np.zeros(len(simplices), dtype=np.int32)
+    k = 0
     for i, (l, h) in enumerate(zip(lo, hi)):
         order = _order_exterior_vertices(simplices[np.sort(indices[l:h])])
-        if not (set(order) & outer):
-            faces += [order]
+        if len(order) < max_face_size:
+            face_sizes[k] = len(order)
+            faces[k, :face_sizes[k]] = order
+            k += 1
+        else:
+           order = set(order)
+           if order & outer:
+               outer.update(order)
 
-    # adjacency = [set() for _ in range(len(points))]
-    # for face in faces:
-    #    for i, j in enumerate(face):
-    #        adjacency[j].add(face[i - 1])
+    faces = faces[:k]
+    face_sizes = face_sizes[:k]
 
-    return faces
+    if remove_outlier_faces:
+        areas = face_areas(points, faces, face_sizes)
+        median = np.median(areas)
+        outliers = []
+        for outlier in np.flip(np.where(areas / median > 4)[0]):
+            vertices = set(faces[outlier])
+            outliers.append(outlier)
+            if vertices & outer:
+                outer.update(vertices)
+
+        faces = np.delete(faces, outliers, axis=0)
+        face_sizes = np.delete(face_sizes, outliers, axis=0)
+
+    if remove_hull_adjacent:
+        outer.update(set(list(delaunay.convex_hull.flatten())))
+        not_hull_faces = [len(set(list(face[:face_size])) & outer) == 0 for face, face_size in zip(faces, face_sizes)]
+        faces = faces[not_hull_faces]
+        face_sizes = face_sizes[not_hull_faces]
+
+    return faces, face_sizes
+
+
+@numba.njit
+def faces_to_linegraph(points, faces, face_sizes):
+    edge_centers = np.zeros((np.sum(face_sizes), 2))
+    edges = np.zeros((np.sum(face_sizes), 2), dtype=np.int32)
+    k = 0
+    for i in range(len(faces)):
+        m = 0
+        for j in range(face_sizes[i]):
+            vert_1 = faces[i][j]
+            vert_2 = faces[i][(j + 1) % face_sizes[i]]
+            edge_centers[k][0] = (points[vert_1][0] + points[vert_2][0]) / 2.
+            edge_centers[k][1] = (points[vert_1][1] + points[vert_2][1]) / 2.
+            m += 1
+            k += 1
+
+        n = 0
+        for j in range(k - m, k):
+            edges[j][0] = j
+            edges[j][1] = k - m + ((n + 1) % m)
+            n += 1
+
+    edges = edges[:k]
+    edge_centers = edge_centers[:k]
+    return edges, edge_centers
