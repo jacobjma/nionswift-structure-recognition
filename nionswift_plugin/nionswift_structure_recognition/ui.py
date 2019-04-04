@@ -210,6 +210,7 @@ class StructureRecognitionPanelDelegate(object):
         self.output_data_item.set_data(output_images[0])
 
     def loop_series(self):
+        pass
 
     def create_panel_widget(self, ui, document_controller):
         self.ui = ui
