@@ -72,8 +72,10 @@ class StructureRecognitionPanelDelegate(object):
     def new_output_dataitem(self):
         self.output_data_item = self.document_controller.library.create_data_item()
 
-    def get_images(self):
-        i = self.get_target_image_data_slice()
+    def get_images(self, i=None):
+        if i is None:
+            i = self.get_target_image_data_slice()
+
         if self.target_data_item.xdata.is_sequence:
             images = tf.convert_to_tensor(self.get_target_image_data()[None, i, ..., None].copy(), dtype=tf.float32)
         else:
@@ -207,6 +209,8 @@ class StructureRecognitionPanelDelegate(object):
 
         self.output_data_item.set_data(output_images[0])
 
+    def loop_series(self):
+
     def create_panel_widget(self, ui, document_controller):
         self.ui = ui
         self.document_controller = document_controller
@@ -269,7 +273,11 @@ class StructureRecognitionPanelDelegate(object):
         output_section = self.add_section('Output')
         output_section.add_push_button('Set Target Data Item', self.set_target_data_item)
         output_section.add_push_button('New Output Data Item', self.new_output_dataitem)
-        self.predict_series_widget = output_section.add_check_box('Predict Series')
+
+
+        #self.predict_series_widget = output_section.add_check_box('Predict Series')
+
+
         # self.predict_series_widget = output_section.add_check_box('Predict Series')
 
         # main_column.add(DeepLearningSection(ui, document_controller, self._data))
