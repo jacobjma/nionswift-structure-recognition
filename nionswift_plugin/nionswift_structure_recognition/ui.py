@@ -51,7 +51,23 @@ class StructureRecognitionPanelDelegate(object):
     def get_target_image_data(self):
         if self.target_data_item is None:
             raise RuntimeError()
-        return self.target_data_item.xdata.data
+
+        try:
+            return self.target_data_item.xdata.data.value
+        except:
+            return self.target_data_item.xdata.data
+
+    def is_series(self):
+        data_length = len(self.target_data_item.xdata.dimensional_shape)
+
+        if data_length == 2:
+            return False
+
+        # return  == 3
+
+    def get_target_series_length(self):
+        if self.target_data_item.xdata.is_sequence:
+            pass
 
     def get_target_shape(self):
         if self.target_data_item.xdata.is_sequence:
@@ -82,7 +98,6 @@ class StructureRecognitionPanelDelegate(object):
             images = tf.convert_to_tensor(self.get_target_image_data()[None, ..., i, None].copy(), dtype=tf.float32)
         print("SHAPE:")
         print(images.shape)
-	
 
         if self.resample_widget.text is not '':
             scale_factor = float(self.resample_widget.text) / self.target_data_item.dimensional_calibrations[1].scale
@@ -275,9 +290,7 @@ class StructureRecognitionPanelDelegate(object):
         output_section.add_push_button('Set Target Data Item', self.set_target_data_item)
         output_section.add_push_button('New Output Data Item', self.new_output_dataitem)
 
-
-        #self.predict_series_widget = output_section.add_check_box('Predict Series')
-
+        # self.predict_series_widget = output_section.add_check_box('Predict Series')
 
         # self.predict_series_widget = output_section.add_check_box('Predict Series')
 
