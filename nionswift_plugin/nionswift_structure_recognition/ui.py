@@ -57,13 +57,15 @@ class StructureRecognitionPanelDelegate(object):
         except:
             return self.target_data_item.xdata.data
 
-    def is_series(self):
+    def is_stack(self):
         data_length = len(self.target_data_item.xdata.dimensional_shape)
 
         if data_length == 2:
             return False
-
-        # return  == 3
+        elif data_length == 3:
+            return True
+        else:
+            raise RuntimeError('Data of dimension {} not recognized'.format(data_length))
 
     def get_target_series_length(self):
         if self.target_data_item.xdata.is_sequence:
@@ -72,17 +74,20 @@ class StructureRecognitionPanelDelegate(object):
     def get_target_shape(self):
         return self.target_data_item.xdata.datum_dimension_shape
 
-        # if self.target_data_item.xdata.is_sequence:
-        #     print("SEQUENCE")
-        #     print(self.target_data_item.xdata.dimensional_shape[1:])
-        #     return self.target_data_item.xdata.dimensional_shape[1:]
-        #
-        # elif self.target_data_item.xdata.is_collectio:
-        #
-        # else:
-        #     print("IMAGE")
-        #     print(self.target_data_item.xdata.dimensional_shape[:2])
-        #     return self.target_data_item.xdata.dimensional_shape[:2]
+    # def get_stack_dimension(self):
+    #    return
+
+    # if self.target_data_item.xdata.is_sequence:
+    #     print("SEQUENCE")
+    #     print(self.target_data_item.xdata.dimensional_shape[1:])
+    #     return self.target_data_item.xdata.dimensional_shape[1:]
+    #
+    # elif self.target_data_item.xdata.is_collectio:
+    #
+    # else:
+    #     print("IMAGE")
+    #     print(self.target_data_item.xdata.dimensional_shape[:2])
+    #     return self.target_data_item.xdata.dimensional_shape[:2]
 
     def get_target_image_data_slice(self):
         if self.target_data_item.xdata.is_sequence:
@@ -97,10 +102,13 @@ class StructureRecognitionPanelDelegate(object):
         if i is None:
             i = self.get_target_image_data_slice()
 
-        if self.target_data_item.xdata.is_sequence:
-            images = tf.convert_to_tensor(self.get_target_image_data()[None, i, ..., None].copy(), dtype=tf.float32)
+        if self.is_stack():
+            if self.target_data_item.xdata.is_sequence:
+                images = tf.convert_to_tensor(self.get_target_image_data()[None, i, ..., None].copy(), dtype=tf.float32)
+            else:
+                images = tf.convert_to_tensor(self.get_target_image_data()[None, ..., i, None].copy(), dtype=tf.float32)
         else:
-            images = tf.convert_to_tensor(self.get_target_image_data()[None, ..., i, None].copy(), dtype=tf.float32)
+            images = tf.convert_to_tensor(self.get_target_image_data()[None, ..., None].copy(), dtype=tf.float32)
         print("SHAPE:")
         print(images.shape)
 
@@ -142,8 +150,8 @@ class StructureRecognitionPanelDelegate(object):
 
         # density = tf.image.resize(density, self.get_target_shape()[1:])
         # confidence = tf.image.resize(confidence, self.get_target_shape()[1:])
-        density = tf.image.resize(density, self.get_target_shape()[:2])
-        confidence = tf.image.resize(confidence, self.get_target_shape()[:2])
+        density = tf.image.resize(density, self.get_target_shape())
+        confidence = tf.image.resize(confidence, self.get_target_shape())
 
         confidence_smearing = float(self.confidence_smear_widget.text)
         confidence_threshold = float(self.confidence_threshold_widget.text)
@@ -167,7 +175,7 @@ class StructureRecognitionPanelDelegate(object):
     def create_output_images(self, images, density, confidence, confidence_region, points):
         background_map = self.background_map_widget.current_item
 
-        images = tf.image.resize(images, self.get_target_shape()[:2])
+        images = tf.image.resize(images, self.get_target_shape())
 
         if background_map == 'Image':
             output_images = images[..., 0, None].numpy()
