@@ -6,6 +6,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 from skimage.io import imsave
+import logging
 
 from .graph import stable_delaunay_graph, faces_to_quadedge
 from .utils import gaussian_filter, density2points, rescale, ensemble_expand, ensemble_reduce
@@ -241,12 +242,14 @@ class StructureRecognitionPanelDelegate(object):
                                 tuple(self.get_target_shape()) + (3,), dtype=np.uint8)
 
         for i in range(self.get_target_series_length()[0]):
-            print(i)
+            if ((i % 10) == 0):
+                logging.info('Processing image {}'.format(i))
+
             images = self.get_images(i)
             density, confidence, confidence_region, points = self.get_predictions(images)
             output_images = self.create_output_images(images, density, confidence, confidence_region, points)
 
-            output_stack[i] = output_images[0]
+            output_stack[i] = np.flip(output_images[0], axis=-1)
 
         imsave('test.tif', output_stack)
 
