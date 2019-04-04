@@ -70,14 +70,19 @@ class StructureRecognitionPanelDelegate(object):
             pass
 
     def get_target_shape(self):
-        if self.target_data_item.xdata.is_sequence:
-            print("SEQUENCE")
-            print(self.target_data_item.xdata.dimensional_shape[1:])
-            return self.target_data_item.xdata.dimensional_shape[1:]
-        else:
-            print("IMAGE")
-            print(self.target_data_item.xdata.dimensional_shape[:2])
-            return self.target_data_item.xdata.dimensional_shape[:2]
+        return self.target_data_item.xdata.datum_dimension_shape
+
+        # if self.target_data_item.xdata.is_sequence:
+        #     print("SEQUENCE")
+        #     print(self.target_data_item.xdata.dimensional_shape[1:])
+        #     return self.target_data_item.xdata.dimensional_shape[1:]
+        #
+        # elif self.target_data_item.xdata.is_collectio:
+        #
+        # else:
+        #     print("IMAGE")
+        #     print(self.target_data_item.xdata.dimensional_shape[:2])
+        #     return self.target_data_item.xdata.dimensional_shape[:2]
 
     def get_target_image_data_slice(self):
         if self.target_data_item.xdata.is_sequence:
