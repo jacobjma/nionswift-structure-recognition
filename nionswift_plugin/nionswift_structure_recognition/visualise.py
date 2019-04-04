@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from matplotlib import colors
 import matplotlib
+import matplotlib.cm
 
 
 def convert2color(image):
