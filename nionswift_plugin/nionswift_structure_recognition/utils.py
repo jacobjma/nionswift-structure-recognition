@@ -23,5 +23,8 @@ class StructureRecognitionModule(object):
     def create_widgets(self, column):
         raise NotImplementedError()
 
-    def process(self, *args, **kwargs):
+    def set_preset(self, name):
+        raise NotImplementedError()
+
+    def fetch_parameters(self):
         raise NotImplementedError()

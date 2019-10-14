@@ -36,7 +36,7 @@ def combo_box_template(ui, label, items, indent=False):
 def check_box_template(ui, label):
     row = ui.create_row_widget()
     widget = ui.create_check_box_widget(label)
-    row.add_spacing(5)
+    #row.add_spacing(5)
     row.add(widget)
     return row, widget
 

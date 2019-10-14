@@ -4,8 +4,17 @@ import numpy as np
 from .utils import ind2sub, sub2ind
 
 
-#@nb.njit
-def index_disc(distance):
+def non_maximum_suppresion(density, classes, distance, threshold):
+    shape = density.shape[2:]
+
+    density = density.reshape((density.shape[0], -1))
+
+    classes = classes.reshape(classes.shape[:2] + (-1,))
+    probabilities = np.zeros(classes.shape, dtype=classes.dtype)
+
+    accepted = np.zeros(density.shape, dtype=np.bool_)
+    suppressed = np.zeros(density.shape, dtype=np.bool_)
+
     x_disc = np.zeros((2 * distance + 1, 2 * distance + 1), dtype=np.int32)
 
     x_disc[:] = np.linspace(0, 2 * distance, 2 * distance + 1)
@@ -20,41 +29,33 @@ def index_disc(distance):
     x_disc = x_disc[r2 < distance ** 2]
     y_disc = y_disc[r2 < distance ** 2]
 
-    return x_disc, y_disc
+    weights = np.exp(-r2 / (2 * (distance / 3) ** 2))
+    weights = np.reshape(weights[r2 < distance ** 2], (-1, 1))
 
+    for i in range(density.shape[0]):
+        suppressed[i][density[i] < threshold] = True
+        for j in np.argsort(-density[i].ravel()):
+            if not suppressed[i, j]:
+                accepted[i, j] = True
 
-def non_maximum_suppresion(markers, distance, threshold=None, max_peaks=np.inf):
-    shape = markers.shape
+                x, y = ind2sub(shape, j)
+                neighbors_x = x + x_disc
+                neighbors_y = y + y_disc
 
-    markers = markers.ravel()
-    accepted = np.zeros(markers.shape, dtype=np.bool_)
-    suppressed = np.zeros(markers.shape, dtype=np.bool_)
+                valid = ((neighbors_x > -1) & (neighbors_y > -1) & (neighbors_x < shape[0]) & (
+                        neighbors_y < shape[1]))
 
-    x_disc, y_disc = index_disc(distance)
+                neighbors_x = neighbors_x[valid]
+                neighbors_y = neighbors_y[valid]
 
-    if threshold is not None:
-        suppressed[markers < threshold] = True
+                k = sub2ind(neighbors_x, neighbors_y, shape)
+                suppressed[i][k] = True
 
-    num_peaks = 0
-    for i in np.argsort(-markers.ravel()):
-        if num_peaks == max_peaks:
-            break
+                tmp = np.sum(classes[i, :, k] * weights[valid], axis=0)
+                probabilities[i, :, j] = tmp / np.sum(tmp)
 
-        if not suppressed[i]:
-            accepted[i] = True
+    accepted = accepted.reshape((classes.shape[0],) + shape)
 
-            x, y = ind2sub(shape, i)
-            neighbors_x = x + x_disc
-            neighbors_y = y + y_disc
+    probabilities = probabilities.reshape(classes.shape[:2] + shape)
 
-            valid = ((neighbors_x > -1) & (neighbors_y > -1) & (neighbors_x < shape[0]) & (neighbors_y < shape[1]))
-
-            neighbors_x = neighbors_x[valid]
-            neighbors_y = neighbors_y[valid]
-
-            k = sub2ind(neighbors_x, neighbors_y, shape)
-            suppressed[k] = True
-            num_peaks += 1
-
-    accepted = accepted.reshape(shape)
-    return accepted
+    return accepted, probabilities
