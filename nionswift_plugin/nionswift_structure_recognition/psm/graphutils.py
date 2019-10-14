@@ -1,8 +1,8 @@
 import numba as nb
 import numpy as np
 
-from psm.utils import ind2sub, check_clockwise
-from psm.segments import RunLengthSegments
+from .utils import ind2sub, check_clockwise
+from .segments import RunLengthSegments
 from collections import defaultdict
 
 
