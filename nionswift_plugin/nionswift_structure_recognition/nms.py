@@ -1,4 +1,3 @@
-import numba as nb
 import numpy as np
 
 from .utils import ind2sub, sub2ind

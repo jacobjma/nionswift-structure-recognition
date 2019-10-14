@@ -2,10 +2,9 @@ import matplotlib.pyplot as plt
 import numba as nb
 import numpy as np
 import scipy.spatial
-from scipy.sparse import csr_matrix
 from sklearn.cluster import DBSCAN
 
-from .graphutils import adjacency_to_faces, outer_face_from_inner, remove_outer_adjacent
+from .graphutils import adjacency_to_faces, outer_face_from_inner
 from .graphutils import faces_to_adjacency, adjacency_to_edges, dual_faces, linegraph_faces, order_looping_edges
 from .segments import RunLengthSegments, segment_centers
 from .utils import generate_indices, set_difference, check_clockwise, simplex_circumcenter
