@@ -45,7 +45,6 @@ def _stable_delaunay_cluster(points, simplices, neighbors, threshold, length_thr
             d = 0.
             for j in np.where(neighbors[i] == -1)[0]:
                 alpha = min(np.pi - angles[i][j], alpha)
-                # for j in np.where(neighbors[i] != -1)[0]:
 
             for j in np.where(neighbors[i] != -1)[0]:
                 d = max(np.linalg.norm(points[simplices[i][j - 1]] - points[simplices[i][j]]), d)

@@ -13,6 +13,7 @@ class GraphModule(StructureRecognitionModule):
         super().__init__(ui, document_controller)
 
         self.alpha = None
+        self.cutoff = None
 
     def create_widgets(self, column):
         section = Section(self.ui, 'Graph')

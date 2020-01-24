@@ -81,7 +81,7 @@ class DeepLearningModule(StructureRecognitionModule):
         #     raise RuntimeError('')
 
         scale = sampling / self.training_sampling
-        # print(scale)
+
         image = normalize_global(rescale(image, scale, multichannel=False, anti_aliasing=False))
 
         margin = self.margin / sampling
