@@ -13,6 +13,7 @@ _ = gettext.gettext
 from skimage import measure
 from skimage.morphology import binary_dilation, disk
 from skimage.filters import gaussian
+import torch
 
 
 def generate_indices(labels):
@@ -68,8 +69,8 @@ class StructureRecognitionPanelDelegate:
         self.panel_position = "right"
         self.output_data_item = None
         self.source_data_item = None
-        self.pill2kill = threading.Event()
-        self.pill2kill.set()
+        self.stop_live_analysis_event = threading.Event()
+        self.stop_live_analysis_event.set()
 
     def create_panel_widget(self, ui, document_controller):
         self.ui = ui
@@ -97,7 +98,7 @@ class StructureRecognitionPanelDelegate:
         run_row, self.run_push_button = push_button_template(ui, 'Start live analysis')
 
         def start_live_analysis():
-            if self.pill2kill.is_set():
+            if self.stop_live_analysis_event.is_set():
                 self.start_live_analysis()
             else:
                 self.stop_live_analysis()
@@ -135,7 +136,7 @@ class StructureRecognitionPanelDelegate:
 
     def update_parameters(self):
         self.scale_detection_module.fetch_parameters()
-        # self.deep_learning_module.fetch_parameters()
+        self.deep_learning_module.fetch_parameters()
         # self.graph_module.fetch_parameters()
         # self.visualization_module.fetch_parameters()
 
@@ -144,15 +145,15 @@ class StructureRecognitionPanelDelegate:
         return camera.is_playing
 
     def start_live_analysis(self):
-        #self.check_can_analyse_live()
+        # self.check_can_analyse_live()
         self.run_push_button.text = 'Abort live analysis'
-        self.pill2kill = threading.Event()
+        self.stop_live_analysis_event = threading.Event()
         self.process_live()
 
     def stop_live_analysis(self):
         self.run_push_button.text = 'Start live analysis'
-        self.pill2kill.set()
-        #self.thread.join()
+        self.stop_live_analysis_event.set()
+        # self.thread.join()
 
     def process_live(self):
         # def on_first_frame():
@@ -167,27 +168,32 @@ class StructureRecognitionPanelDelegate:
             xdata = self.api.create_data_and_metadata(dummy_data, data_descriptor=descriptor)
             self.output_data_item = self.api.library.create_data_item_from_data_and_metadata(xdata)
 
+        self.update_parameters()
+
         print('start processing')
         with self.api.library.data_ref_for_data_item(self.output_data_item) as data_ref:
 
-            def thread_this(pill2kill, camera):
-                i = 0
-                while not pill2kill.is_set():
-                    #if not camera.is_playing:
-                    #    self.stop_live_analysis()
+            def thread_this(stop_live_analysis_event, camera, data_ref):
+                while not stop_live_analysis_event.is_set():
+                    if not camera.is_playing:
+                        self.stop_live_analysis()
 
-                    source_data = camera.grab_next_to_finish()
-                    image = source_data[0].data.copy()
+                    source_data = camera.grab_next_to_finish()  # TODO: This starts scanning? Must be a bug.
 
-                    # sampling = self.scale_detection_module.detect_scale(image)
-                    # self.scale_detection_module.fetch_parameters()
-                    # print(self.scale_detection_module.min_sampling)
+                    images = source_data[0].data.copy()
 
-                    image[:100] = 0
+                    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+                    images = torch.tensor(images).to(device)
 
-                    data_ref.data = image
-                    print(i)
-                    i += 1
+                    sampling = self.scale_detection_module.detect_scale(images)
+
+                    images = self.deep_learning_module.reshape_images(images)
+                    images = self.deep_learning_module.rescale_images(images, sampling)
+                    images = self.deep_learning_module.normalize_images(images)
+
+                    data_ref.data = images[0, 0].cpu().numpy()
+                    # print(i)
+                    # i += 1
 
                 #     preprocessed = self.deep_learning_module.preprocess_image(image, sampling)
                 #
@@ -220,8 +226,9 @@ class StructureRecognitionPanelDelegate:
                 #     visualization = self.visualization_module.create_visualization(image, density, classes, graph, rmsd,
                 #                                                                    probabilities)
 
-        self.thread = threading.Thread(target=thread_this, args=(self.pill2kill, self.get_camera()))
-        self.thread.start()
+            self.thread = threading.Thread(target=thread_this,
+                                           args=(self.stop_live_analysis_event, self.get_camera(), data_ref))
+            self.thread.start()
 
 
 class StructureRecognitionExtension(object):

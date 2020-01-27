@@ -1,8 +1,8 @@
 import numpy as np
 
-from .psm.graph import GeometricGraph
-from .psm.rmsd import RMSD
-from .psm.templates import regular_polygon
+# from .psm.graph import GeometricGraph
+# from .psm.rmsd import RMSD
+# from .psm.templates import regular_polygon
 from .utils import StructureRecognitionModule
 from .widgets import Section, line_edit_template
 

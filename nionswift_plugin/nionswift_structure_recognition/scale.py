@@ -42,9 +42,6 @@ class ScaleDetectionModule(StructureRecognitionModule):
         self.min_sampling = float(self.min_sampling_line_edit._widget.text)
 
     def detect_scale(self, data):
-        if not ((len(data.shape) == 2) or (len(data.shape) == 3)):
-            raise RuntimeError()
-
         if self.crystal_system not in ['hexagonal']:
             raise RuntimeError('structure {} not recognized for scale recognition'.format(self.crystal_system))
 
