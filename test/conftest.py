@@ -33,12 +33,11 @@ def test_data_1():
         npzfile = np.load('test_data_1.npz')
         data = {key: npzfile[key] for key in npzfile.keys()}
     except:
-        data = create_data(20, 512, 2)
+        data = create_data(40, 512, 2)
         np.savez('test_data_1.npz', **data)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     data['image'] = torch.tensor(data['image']).to(device)
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     data['density'] = torch.tensor(data['density']).to(device)
     return data
 
@@ -49,12 +48,11 @@ def test_data_2():
         npzfile = np.load('test_data_2.npz')
         data = {key: npzfile[key] for key in npzfile.keys()}
     except:
-        data = create_data(40, 512, 2)
+        data = create_data(20, 512, 2)
         np.savez('test_data_2.npz', **data)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     data['image'] = torch.tensor(data['image']).to(device)
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     data['density'] = torch.tensor(data['density']).to(device)
     return data
 

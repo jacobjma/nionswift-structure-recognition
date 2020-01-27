@@ -2,15 +2,14 @@ import os
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from abtem.learn.postprocess import non_maximum_suppresion
 from abtem.learn.preprocess import weighted_normalization, pad_to_size
 from abtem.learn.unet import UNet
-from skimage.transform import rescale
 
 from .utils import StructureRecognitionModule
 from .widgets import Section, line_edit_template
+from skimage.transform import rescale
 
 presets = {'graphene':
                {'mask_weights_file': 'graphene_mask.pt',
@@ -100,12 +99,15 @@ class DeepLearningModule(StructureRecognitionModule):
         models_dir = os.path.join(os.path.join(os.path.join(os.path.dirname(__file__), '..'), '..'), 'models')
         density_weights = os.path.join(models_dir, self.density_weights_line_edit.text)
         mask_weights = os.path.join(models_dir, self.mask_weights_line_edit.text)
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-        self.mask_model = UNet(in_channels=1, out_channels=3, activation=nn.Softmax(1), init_features=32, dropout=0.)
+        self.mask_model = UNet(in_channels=1, out_channels=3, init_features=32, dropout=0.)
         self.mask_model.load_state_dict(torch.load(mask_weights, map_location=torch.device('cpu')))
+        self.mask_model.to(device)
 
-        self.density_model = UNet(in_channels=1, out_channels=1, activation=nn.Sigmoid(), init_features=32, dropout=0.)
+        self.density_model = UNet(in_channels=1, out_channels=1, init_features=32, dropout=0.)
         self.density_model.load_state_dict(torch.load(density_weights, map_location=torch.device('cpu')))
+        self.density_model.to(device)
 
     def forward_pass(self, preprocessed_image):
         density, classes = self.model(preprocessed_image)
@@ -115,11 +117,11 @@ class DeepLearningModule(StructureRecognitionModule):
         nms_distance_pixels = int(np.round(self.nms_distance / self.training_sampling))
 
         accepted = non_maximum_suppresion(density, distance=nms_distance_pixels,
-                                                         threshold=self.nms_threshold, classes=classes)
+                                          threshold=self.nms_threshold, classes=classes)
 
         points = np.array(np.where(accepted[0])).T
         # probabilities = probabilities[0, :, points[:, 0], points[:, 1]]
-        return points #, probabilities
+        return points  # , probabilities
 
     def fetch_parameters(self):
         self.training_sampling = float(self.training_sampling_line_edit.text)

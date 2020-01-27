@@ -4,59 +4,16 @@ import threading
 import numpy as np
 
 from .dl import DeepLearningModule
-from .graph import GraphModule
+# from .graph import GraphModule
 from .scale import ScaleDetectionModule
 from .visualization import VisualizationModule
 from .widgets import ScrollArea, push_button_template, combo_box_template
 
 _ = gettext.gettext
-from skimage import measure
-from skimage.morphology import binary_dilation, disk
-from skimage.filters import gaussian
+# from skimage import measure
+# from skimage.morphology import binary_dilation, disk
 import torch
-
-
-def generate_indices(labels):
-    labels = labels.flatten()
-    labels_order = labels.argsort()
-    sorted_labels = labels[labels_order]
-    indices = np.arange(0, len(labels) + 1)[labels_order]
-    index = np.arange(1, np.max(labels) + 1)
-    lo = np.searchsorted(sorted_labels, index, side='left')
-    hi = np.searchsorted(sorted_labels, index, side='right')
-    for i, (l, h) in enumerate(zip(lo, hi)):
-        yield np.sort(indices[l:h])
-
-
-def merge_overlapping(classes, dims):
-    classes = classes.copy()
-    amax = np.argmax(classes, axis=1)
-
-    shape = classes.shape
-    substitution = amax == dims[0]
-    contamination = (amax == dims[1])  # .ravel()
-
-    classes = classes.reshape(classes.shape[:2] + (-1,))
-
-    for i in range(len(classes)):
-        substitution[i] = binary_dilation(substitution[i], disk(1))
-
-        substitution_labels = measure.label(substitution[i])
-        contamination_labels = measure.label(contamination[i])
-
-        sizes = np.zeros(contamination_labels.max(), dtype=np.int)
-        for j, idx in enumerate(generate_indices(contamination_labels)):
-            sizes[j] = len(idx)
-
-        for idx in generate_indices(substitution_labels):
-            if contamination[i].ravel()[idx].any():
-                overlap = contamination_labels.ravel()[idx]
-                overlap = overlap[overlap > 0] - 1
-                if (sizes[overlap] > len(idx)).any():
-                    classes[i, dims[1], idx] += classes[i, dims[0], idx]
-                    classes[i, dims[0], idx] = 0
-
-    return classes.reshape(shape)
+import torch.nn as nn
 
 
 class StructureRecognitionPanelDelegate:
@@ -81,13 +38,13 @@ class StructureRecognitionPanelDelegate:
 
         self.scale_detection_module = ScaleDetectionModule(ui, document_controller)
         self.deep_learning_module = DeepLearningModule(ui, document_controller)
-        self.graph_module = GraphModule(ui, document_controller)
+        # self.graph_module = GraphModule(ui, document_controller)
         self.visualization_module = VisualizationModule(ui, document_controller)
 
         def preset_combo_box_changed(x):
             self.scale_detection_module.set_preset(x.lower())
             self.deep_learning_module.set_preset(x.lower())
-            self.graph_module.set_preset(x.lower())
+            # self.graph_module.set_preset(x.lower())
             self.visualization_module.set_preset(x.lower())
 
         preset_row, self.preset_combo_box = combo_box_template(self.ui, 'Preset', ['None', 'Graphene'],
@@ -117,7 +74,7 @@ class StructureRecognitionPanelDelegate:
         #
         self.scale_detection_module.create_widgets(main_column)
         self.deep_learning_module.create_widgets(main_column)
-        self.graph_module.create_widgets(main_column)
+        # self.graph_module.create_widgets(main_column)
         self.visualization_module.create_widgets(main_column)
 
         self.preset_combo_box.current_item = 'Graphene'
@@ -138,7 +95,7 @@ class StructureRecognitionPanelDelegate:
         self.scale_detection_module.fetch_parameters()
         self.deep_learning_module.fetch_parameters()
         # self.graph_module.fetch_parameters()
-        # self.visualization_module.fetch_parameters()
+        self.visualization_module.fetch_parameters()
 
     def check_can_analyse_live(self):
         camera = self.get_camera()
@@ -191,11 +148,11 @@ class StructureRecognitionPanelDelegate:
                     images = self.deep_learning_module.rescale_images(images, sampling)
                     images = self.deep_learning_module.normalize_images(images)
 
-                    mask = self.deep_learning_module.mask_model(images)
-                    mask = torch.sum(mask[:, :-1], dim=1)[:, None]
+                    classes = nn.Softmax(1)(self.deep_learning_module.mask_model(images))
+                    mask = torch.sum(classes[:, :-1], dim=1)[:, None]
 
                     images = self.deep_learning_module.normalize_images(images, mask)
-                    density = self.deep_learning_module.density_model(images)
+                    density = nn.Sigmoid()(self.deep_learning_module.density_model(images))
 
                     density = density * mask
                     density = density.detach().cpu().numpy()
@@ -203,7 +160,18 @@ class StructureRecognitionPanelDelegate:
                     points = self.deep_learning_module.nms(density)
                     points = self.deep_learning_module.postprocess_points(points, density.shape[2:], orig_shape,
                                                                           sampling)
-                    data_ref.data = density[0, 0].detach().cpu().numpy()
+
+                    density = self.deep_learning_module.postprocess_images(density[0, 0], orig_shape, sampling)
+
+                    classes = classes[0].detach().cpu().numpy()
+                    classes = np.argmax(classes, axis=0).astype(np.float)
+
+                    classes = self.deep_learning_module.postprocess_images(classes, orig_shape, sampling)
+
+                    visualization = self.visualization_module.create_background(source_data[0].data, classes, density)
+                    visualization = self.visualization_module.add_points(visualization, points)
+
+                    data_ref.data = visualization
                     # data_ref.data = mask[0, 0].detach().cpu().numpy()
                     # print(i)
                     # i += 1

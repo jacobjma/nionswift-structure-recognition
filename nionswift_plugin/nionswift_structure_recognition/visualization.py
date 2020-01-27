@@ -117,7 +117,7 @@ class VisualizationModule(StructureRecognitionModule):
                 points_size_row, self.points_size_line_edit = line_edit_template(self.ui, 'Point size', default_text=3)
 
                 points_color_row, self.points_color_combo_box = combo_box_template(self.ui, 'Point color',
-                                                                                   ['Class', 'Solid'])
+                                                                                   ['Solid', 'Class'])
 
                 self.points_color_combo_box.on_current_item_changed = point_color_combo_box_changed
 
@@ -134,59 +134,59 @@ class VisualizationModule(StructureRecognitionModule):
         self.points_check_box.checked = True
         points_check_box_changed(self.points_check_box.checked)
 
-        graph_row, self.graph_check_box = check_box_template(self.ui, 'Overlay graph')
-        section.column.add(graph_row)
-
-        graph_settings_column = self.ui.create_column_widget()
-        self.line_width_line_edit = None
-        section.column.add(graph_settings_column)
-        section.column.add_spacing(5)
-
-        def graph_check_box_changed(checked):
-            graph_settings_column._widget.remove_all()
-
-            if checked:
-                line_width_row, self.line_width_line_edit = line_edit_template(self.ui, 'Line width', default_text=2)
-
-                graph_settings_column.add_spacing(5)
-                graph_settings_column.add(line_width_row)
-
-        self.graph_check_box.on_checked_changed = graph_check_box_changed
-        self.graph_check_box.checked = True
-        graph_check_box_changed(self.graph_check_box.checked)
-
-        faces_row, self.faces_check_box = check_box_template(self.ui, 'Overlay faces')
-        section.column.add(faces_row)
-
-        faces_settings_column = self.ui.create_column_widget()
-        self.faces_color_combo_box = None
-        self.faces_cmap_combo_box = None
-        section.column.add(faces_settings_column)
-        section.column.add_spacing(5)
-
-        def faces_check_box_changed(checked):
-            faces_settings_column._widget.remove_all()
-
-            if checked:
-                faces_color_row, self.faces_color_combo_box = combo_box_template(self.ui, 'Face color',
-                                                                                 ['Size', 'RMSD', 'exx', 'eyy'])
-
-                faces_settings_column.add_spacing(5)
-                faces_settings_column.add(faces_color_row)
-
-                faces_cmap_row, self.faces_cmap_combo_box = combo_box_template(self.ui, 'Color map',
-                                                                               ['gray', 'viridis', 'plasma', 'Paired',
-                                                                                'tab10'])
-
-                faces_settings_column.add_spacing(5)
-                faces_settings_column.add(faces_cmap_row)
-
-                # faces_vmin_row, self.faces_vmin_line_edit = line_edit_template(self.ui, 'vmin', default_text=0)
-                # faces_vmax_row, self.faces_vmax_line_edit = line_edit_template(self.ui, 'vmin', default_text=0)
-
-        self.faces_check_box.on_checked_changed = faces_check_box_changed
-        self.faces_check_box.checked = False
-        faces_check_box_changed(self.faces_check_box.checked)
+        # graph_row, self.graph_check_box = check_box_template(self.ui, 'Overlay graph')
+        # section.column.add(graph_row)
+        #
+        # graph_settings_column = self.ui.create_column_widget()
+        # self.line_width_line_edit = None
+        # section.column.add(graph_settings_column)
+        # section.column.add_spacing(5)
+        #
+        # def graph_check_box_changed(checked):
+        #     graph_settings_column._widget.remove_all()
+        #
+        #     if checked:
+        #         line_width_row, self.line_width_line_edit = line_edit_template(self.ui, 'Line width', default_text=2)
+        #
+        #         graph_settings_column.add_spacing(5)
+        #         graph_settings_column.add(line_width_row)
+        #
+        # self.graph_check_box.on_checked_changed = graph_check_box_changed
+        # self.graph_check_box.checked = True
+        # graph_check_box_changed(self.graph_check_box.checked)
+        #
+        # faces_row, self.faces_check_box = check_box_template(self.ui, 'Overlay faces')
+        # section.column.add(faces_row)
+        #
+        # faces_settings_column = self.ui.create_column_widget()
+        # self.faces_color_combo_box = None
+        # self.faces_cmap_combo_box = None
+        # section.column.add(faces_settings_column)
+        # section.column.add_spacing(5)
+        #
+        # def faces_check_box_changed(checked):
+        #     faces_settings_column._widget.remove_all()
+        #
+        #     if checked:
+        #         faces_color_row, self.faces_color_combo_box = combo_box_template(self.ui, 'Face color',
+        #                                                                          ['Size', 'RMSD', 'exx', 'eyy'])
+        #
+        #         faces_settings_column.add_spacing(5)
+        #         faces_settings_column.add(faces_color_row)
+        #
+        #         faces_cmap_row, self.faces_cmap_combo_box = combo_box_template(self.ui, 'Color map',
+        #                                                                        ['gray', 'viridis', 'plasma', 'Paired',
+        #                                                                         'tab10'])
+        #
+        #         faces_settings_column.add_spacing(5)
+        #         faces_settings_column.add(faces_cmap_row)
+        #
+        #         # faces_vmin_row, self.faces_vmin_line_edit = line_edit_template(self.ui, 'vmin', default_text=0)
+        #         # faces_vmax_row, self.faces_vmax_line_edit = line_edit_template(self.ui, 'vmin', default_text=0)
+        #
+        # self.faces_check_box.on_checked_changed = faces_check_box_changed
+        # self.faces_check_box.checked = False
+        # faces_check_box_changed(self.faces_check_box.checked)
 
     def set_preset(self, x):
         pass
@@ -203,19 +203,18 @@ class VisualizationModule(StructureRecognitionModule):
             if self.points_color == 'solid':
                 self.points_color_solid = self.point_color_solid_line_edit.text
 
-        self.overlay_graph = self.graph_check_box.checked
+        # self.overlay_graph = self.graph_check_box.checked
+        #
+        # if self.overlay_graph:
+        #     self.line_width = int(self.line_width_line_edit.text)
+        #
+        # self.overlay_faces = self.faces_check_box.checked
+        #
+        # if self.overlay_faces:
+        #     self.faces_color = self.faces_color_combo_box.current_item.lower()
+        #     self.faces_cmap = self.faces_cmap_combo_box.current_item
 
-        if self.overlay_graph:
-            self.line_width = int(self.line_width_line_edit.text)
-
-        self.overlay_faces = self.faces_check_box.checked
-
-        if self.overlay_faces:
-            self.faces_color = self.faces_color_combo_box.current_item.lower()
-            self.faces_cmap = self.faces_cmap_combo_box.current_item
-
-
-    def create_background(self, image, density):
+    def create_background(self, image, classes, density):
 
         if self.background == 'image':
             visualization = ((image - image.min()) / image.ptp() * 255).astype(np.uint8)
@@ -225,15 +224,32 @@ class VisualizationModule(StructureRecognitionModule):
             visualization = (density * 255).astype(np.uint8)
             visualization = np.tile(visualization[..., None], (1, 1, 3))
 
-        # elif self.background == 'classes':
-        #     visualization = (classes / 3 * 255).astype(np.uint8)
-        #     visualization = np.tile(visualization[..., None], (1, 1, 3))
+        elif self.background == 'classes':
+            visualization = (classes / classes.max() * 255).astype(np.uint8)
+            visualization = np.tile(visualization[..., None], (1, 1, 3))
 
         elif self.background == 'solid':
             visualization = None
 
         else:
             raise RuntimeError()
+
+        return visualization
+
+    def add_points(self, visualization, points):
+        if self.overlay_points:
+            if self.points_color == 'solid':
+                color = mcolors.to_rgba(named_colors[self.points_color_solid])[:3]
+                colors = [tuple([int(x * 255) for x in color[::-1]])] * len(points)
+
+            # elif self.points_color == 'class':
+            #     colors = (get_colors_from_cmap(probabilities[:, 2], 'autumn', vmin=0, vmax=1) * 255).astype(int)
+            #     colors = colors[:, :-1][:, ::-1]
+
+            else:
+                raise NotImplementedError()
+
+            visualization = add_points(points, visualization, self.points_size, colors)
 
         return visualization
 
