@@ -12,55 +12,51 @@ from nion.ui import TestUI
 
 from nionswift_plugin.nionswift_structure_recognition.dl import DeepLearningModule
 from nionswift_plugin.nionswift_structure_recognition.scale import ScaleDetectionModule
+from nionswift_plugin.nionswift_structure_recognition.visualization import VisualizationModule
 
 
-def create_test_image(gpts, extent, background=1.):
+def create_data(extent, gpts, background=1.):
     np.random.seed(7)
-    points = graphene_like(a=2.46, labels=[1, 1])
+    points = graphene_like(a=2.46, labels=[0, 0])
     points = rotate(points, np.random.rand() * 360., rotate_cell=True)
     points = fill_rectangle(points, origin=[0, 0], extent=extent, margin=4)
-    points = random_add_contamination(points, 3, extent, .8)
-    image = gaussian_marker_labels(points, .4, gpts).astype(np.float32)
-    return np.random.poisson(background + image)
+    points = random_add_contamination(points, 1, np.diag(points.cell), .8)
+    density = gaussian_marker_labels(points, .4, gpts).astype(np.float32)
+    image = np.random.poisson(background + density).astype(np.float32)
+    sampling = extent / gpts
+    return {'image': image, 'density': density, 'positions': points.positions / sampling, 'sampling': extent / gpts}
 
 
 @pytest.fixture(scope="session", autouse=True)
-def noisy_image_1():
+def test_data_1():
     try:
-        image = np.load('noisy_image_1.npy')
+        npzfile = np.load('test_data_1.npz')
+        data = {key: npzfile[key] for key in npzfile.keys()}
     except:
-        image = create_test_image(512, 40, 20).astype(np.float32)
-        np.save('noisy_image_1.npy', image)
+        data = create_data(20, 512, 2)
+        np.savez('test_data_1.npz', **data)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    image = torch.tensor(image).to(device)
-    return image
+    data['image'] = torch.tensor(data['image']).to(device)
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    data['density'] = torch.tensor(data['density']).to(device)
+    return data
 
 
 @pytest.fixture(scope="session", autouse=True)
-def noisy_image_2():
+def test_data_2():
     try:
-        image = np.load('noisy_image_2.npy')
+        npzfile = np.load('test_data_2.npz')
+        data = {key: npzfile[key] for key in npzfile.keys()}
     except:
-        image = create_test_image(512, 20, 10).astype(np.float32)
-        np.save('noisy_image_2.npy', image)
+        data = create_data(40, 512, 2)
+        np.savez('test_data_2.npz', **data)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    image = torch.tensor(image).to(device)
-    return image
-
-
-@pytest.fixture(scope="session", autouse=True)
-def noisy_image_3():
-    try:
-        image = np.load('noisy_image_3.npy')
-    except:
-        image = create_test_image(512, 10, 2.5).astype(np.float32)
-        np.save('noisy_image_3.npy', image)
-
+    data['image'] = torch.tensor(data['image']).to(device)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    image = torch.tensor(image).to(device)
-    return image
+    data['density'] = torch.tensor(data['density']).to(device)
+    return data
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -87,6 +83,16 @@ def scale_detection_module(ui_column):
 def deep_learning_module(ui_column):
     ui, document_controller, column = ui_column
     sdm = DeepLearningModule(ui, document_controller)
+    sdm.create_widgets(column)
+    sdm.set_preset('graphene')
+    sdm.fetch_parameters()
+    return sdm
+
+
+@pytest.fixture
+def visualization_module(ui_column):
+    ui, document_controller, column = ui_column
+    sdm = VisualizationModule(ui, document_controller)
     sdm.create_widgets(column)
     sdm.set_preset('graphene')
     sdm.fetch_parameters()

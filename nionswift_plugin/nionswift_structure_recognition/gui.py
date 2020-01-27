@@ -181,17 +181,30 @@ class StructureRecognitionPanelDelegate:
                     source_data = camera.grab_next_to_finish()  # TODO: This starts scanning? Must be a bug.
 
                     images = source_data[0].data.copy()
+                    orig_shape = images.shape[-2:]
 
                     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
                     images = torch.tensor(images).to(device)
 
                     sampling = self.scale_detection_module.detect_scale(images)
-
                     images = self.deep_learning_module.reshape_images(images)
                     images = self.deep_learning_module.rescale_images(images, sampling)
                     images = self.deep_learning_module.normalize_images(images)
 
-                    data_ref.data = images[0, 0].cpu().numpy()
+                    mask = self.deep_learning_module.mask_model(images)
+                    mask = torch.sum(mask[:, :-1], dim=1)[:, None]
+
+                    images = self.deep_learning_module.normalize_images(images, mask)
+                    density = self.deep_learning_module.density_model(images)
+
+                    density = density * mask
+                    density = density.detach().cpu().numpy()
+
+                    points = self.deep_learning_module.nms(density)
+                    points = self.deep_learning_module.postprocess_points(points, density.shape[2:], orig_shape,
+                                                                          sampling)
+                    data_ref.data = density[0, 0].detach().cpu().numpy()
+                    # data_ref.data = mask[0, 0].detach().cpu().numpy()
                     # print(i)
                     # i += 1
 
@@ -209,13 +222,7 @@ class StructureRecognitionPanelDelegate:
                 #
                 #     density = density * mask
                 #
-                #     points, probabilities = self.deep_learning_module.nms(density, classes)
-                #     points = self.deep_learning_module.postprocess_points(points, density.shape[2:], image.shape,
-                #                                                           sampling)
-                #
-                #     graph = self.graph_module.build_graph(points, sampling)
-                #     rmsd = self.graph_module.register_faces(graph)
-                #     rmsd = np.min(rmsd, axis=1)
+
                 #
                 #     density = self.deep_learning_module.postprocess_image(density[0, 0], image.shape, sampling)
                 #     classes = self.deep_learning_module.postprocess_image(

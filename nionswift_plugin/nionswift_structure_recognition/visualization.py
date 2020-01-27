@@ -214,12 +214,8 @@ class VisualizationModule(StructureRecognitionModule):
             self.faces_color = self.faces_color_combo_box.current_item.lower()
             self.faces_cmap = self.faces_cmap_combo_box.current_item
 
-    def create_visualization(self, image, density, classes, graph, rmsd, probabilities):
 
-        # canvas = (0, extent[0], 0, extent[1])
-        # shape = image.shape
-        # points = points[:, ::]
-        # points = scale_points_to_canvas(points, canvas, shape)
+    def create_background(self, image, density):
 
         if self.background == 'image':
             visualization = ((image - image.min()) / image.ptp() * 255).astype(np.uint8)
@@ -229,9 +225,9 @@ class VisualizationModule(StructureRecognitionModule):
             visualization = (density * 255).astype(np.uint8)
             visualization = np.tile(visualization[..., None], (1, 1, 3))
 
-        elif self.background == 'classes':
-            visualization = (classes / 3 * 255).astype(np.uint8)
-            visualization = np.tile(visualization[..., None], (1, 1, 3))
+        # elif self.background == 'classes':
+        #     visualization = (classes / 3 * 255).astype(np.uint8)
+        #     visualization = np.tile(visualization[..., None], (1, 1, 3))
 
         elif self.background == 'solid':
             visualization = None
@@ -239,78 +235,66 @@ class VisualizationModule(StructureRecognitionModule):
         else:
             raise RuntimeError()
 
-        if self.overlay_faces:
-            if self.faces_color == 'size':
-                colors = graph.faces().sizes()
-                vmin = 0
-                vmax = 10
-
-            elif self.faces_color == 'rmsd':
-                colors = rmsd
-                vmin = 0
-                vmax = np.max(rmsd[rmsd != np.inf])
-
-            else:
-                raise RuntimeError()
-
-            colors = (get_colors_from_cmap(colors, self.faces_cmap, vmin, vmax) * 255).astype(int)
-
-            visualization = add_faces(graph.points, graph.faces()[:-1], visualization, colors)
-
-        if self.overlay_graph:
-            visualization = add_edges(graph.points, graph.edges(), visualization, (0, 0, 0), self.line_width)
-
-        if self.overlay_points:
-            if self.points_color == 'solid':
-                color = mcolors.to_rgba(named_colors[self.points_color_solid])[:3]
-                colors = [tuple([int(x * 255) for x in color[::-1]])] * len(graph.points)
-
-            elif self.points_color == 'class':
-                colors = (get_colors_from_cmap(probabilities[:, 2], 'autumn', vmin=0, vmax=1) * 255).astype(int)
-                colors = colors[:, :-1][:, ::-1]
-
-            else:
-                raise NotImplementedError()
-
-            visualization = add_points(graph.points, visualization, self.points_size, colors)
-
         return visualization
 
-    # def create_visualization(self, image, density, confidence, sampling, points, graph, valid, shift):
-    #     extent = np.array(image.shape) * sampling
+    # def create_visualization(self, image, density, points):
     #
-    #     points = points - shift
-    #
-    #     canvas = (0, extent[0], 0, extent[1])
-    #     shape = image.shape
-    #     points = points[:, ::]
-    #     points = scale_points_to_canvas(points, canvas, shape)
-    #
-    #     # visualization = np.zeros(shape + (3,), np.uint8)
+    #     # canvas = (0, extent[0], 0, extent[1])
+    #     # shape = image.shape
+    #     # points = points[:, ::]
+    #     # points = scale_points_to_canvas(points, canvas, shape)
     #
     #     if self.background == 'image':
     #         visualization = ((image - image.min()) / image.ptp() * 255).astype(np.uint8)
     #         visualization = np.tile(visualization[..., None], (1, 1, 3))
+    #
     #     elif self.background == 'density':
-    #         visualization = ((image - image.min()) / image.ptp() * 255).astype(np.uint8)
-    #     elif self.background == 'density':
-    #         visualization = ((image - image.min()) / image.ptp() * 255).astype(np.uint8)
-    #     elif self.background == 'none':
-    #         visualization = np.zeros(image.shape + (3,), dtype=np.uint8)
+    #         visualization = (density * 255).astype(np.uint8)
+    #         visualization = np.tile(visualization[..., None], (1, 1, 3))
+    #
+    #     # elif self.background == 'classes':
+    #     #     visualization = (classes / 3 * 255).astype(np.uint8)
+    #     #     visualization = np.tile(visualization[..., None], (1, 1, 3))
+    #
+    #     elif self.background == 'solid':
+    #         visualization = None
+    #
     #     else:
     #         raise RuntimeError()
     #
-    #     if self.overlay_graph:
-    #         visualization = add_edges(points, graph.edges(), visualization, (0, 0, 0), self.line_width)
+    #     # if self.overlay_faces:
+    #     #     if self.faces_color == 'size':
+    #     #         colors = graph.faces().sizes()
+    #     #         vmin = 0
+    #     #         vmax = 10
+    #     #
+    #     #     elif self.faces_color == 'rmsd':
+    #     #         colors = rmsd
+    #     #         vmin = 0
+    #     #         vmax = np.max(rmsd[rmsd != np.inf])
+    #     #
+    #     #     else:
+    #     #         raise RuntimeError()
+    #     #
+    #     #     colors = (get_colors_from_cmap(colors, self.faces_cmap, vmin, vmax) * 255).astype(int)
+    #     #
+    #     #     visualization = add_faces(graph.points, graph.faces()[:-1], visualization, colors)
+    #
+    #     # if self.overlay_graph:
+    #     #     visualization = add_edges(graph.points, graph.edges(), visualization, (0, 0, 0), self.line_width)
     #
     #     if self.overlay_points:
     #         if self.points_color == 'solid':
     #             color = mcolors.to_rgba(named_colors[self.points_color_solid])[:3]
-    #             color = tuple([int(x * 255) for x in color[::-1]])
+    #             colors = [tuple([int(x * 255) for x in color[::-1]])] * len(points)
+    #
+    #         # elif self.points_color == 'class':
+    #         #     colors = (get_colors_from_cmap(probabilities[:, 2], 'autumn', vmin=0, vmax=1) * 255).astype(int)
+    #         #     colors = colors[:, :-1][:, ::-1]
     #
     #         else:
     #             raise NotImplementedError()
     #
-    #         visualization = add_points(points, visualization, self.points_size, color)
+    #         visualization = add_points(points, visualization, self.points_size, colors)
     #
     #     return visualization
