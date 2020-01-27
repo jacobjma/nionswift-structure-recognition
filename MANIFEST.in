@@ -1,0 +1,2 @@
+recursive-include nionswift_plugin *.py
+recursive-include models *.pt
