@@ -1,7 +1,5 @@
-import pytest
-
-import torch
 import numpy as np
+import torch
 
 
 def test_reshape(deep_learning_module, test_data_1):

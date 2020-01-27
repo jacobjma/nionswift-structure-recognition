@@ -2,6 +2,8 @@ import gettext
 import threading
 
 import numpy as np
+import torch
+import torch.nn as nn
 
 from .dl import DeepLearningModule
 # from .graph import GraphModule
@@ -10,10 +12,6 @@ from .visualization import VisualizationModule
 from .widgets import ScrollArea, push_button_template, combo_box_template
 
 _ = gettext.gettext
-# from skimage import measure
-# from skimage.morphology import binary_dilation, disk
-import torch
-import torch.nn as nn
 
 
 class StructureRecognitionPanelDelegate:

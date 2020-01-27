@@ -1,7 +1,8 @@
 import cv2
+import matplotlib
 import numpy as np
 from matplotlib import colors as mcolors
-import matplotlib
+
 from .utils import StructureRecognitionModule
 from .widgets import Section, combo_box_template, check_box_template, line_edit_template
 
@@ -82,8 +83,7 @@ class VisualizationModule(StructureRecognitionModule):
         column.add(section)
 
         background_row, self.background_combo_box = combo_box_template(self.ui, 'Background',
-                                                                       ['Image', 'Density', 'Classes', 'Confidence',
-                                                                        'Solid'])
+                                                                       ['Image', 'Density', 'Classes', 'Solid'])
         section.column.add(background_row)
 
         points_row, self.points_check_box = check_box_template(self.ui, 'Overlay points')
