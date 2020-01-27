@@ -58,7 +58,7 @@ def merge_overlapping(classes, dims):
     return classes.reshape(shape)
 
 
-class StructureRecognitionPanelDelegate(object):
+class StructureRecognitionPanelDelegate:
 
     def __init__(self, api):
         self.api = api
@@ -68,8 +68,8 @@ class StructureRecognitionPanelDelegate(object):
         self.panel_position = "right"
         self.output_data_item = None
         self.source_data_item = None
-        self.continue_live_analysis = True
-        self.is_analysing = False
+        self.pill2kill = threading.Event()
+        self.pill2kill.set()
 
     def create_panel_widget(self, ui, document_controller):
         self.ui = ui
@@ -94,29 +94,32 @@ class StructureRecognitionPanelDelegate(object):
         self.preset_combo_box.on_current_item_changed = preset_combo_box_changed
         main_column.add(preset_row)
 
+        run_row, self.run_push_button = push_button_template(ui, 'Start live analysis')
+
         def start_live_analysis():
-            if not self.is_analysing:
-                self.process_live()
+            if self.pill2kill.is_set():
+                self.start_live_analysis()
+            else:
+                self.stop_live_analysis()
 
-        run_row, run_push_button = push_button_template(ui, 'Analyse live', start_live_analysis)
+        self.run_push_button.on_clicked = start_live_analysis
 
-        def stop_live_analysis():
-            self.continue_live_analysis = False
+        # def stop_live_analysis():
+        #    self.continue_live_analysis = False
 
-        stop_row, stop_push_button = push_button_template(ui, 'Stop', stop_live_analysis)
+        # stop_row, stop_push_button = push_button_template(ui, 'Stop', stop_live_analysis)
 
         live_analysis_row = ui.create_row_widget()
         live_analysis_row.add(run_row)
-        live_analysis_row.add(stop_row)
+        # live_analysis_row.add(stop_row)
         main_column.add(live_analysis_row)
-
+        #
         self.scale_detection_module.create_widgets(main_column)
         self.deep_learning_module.create_widgets(main_column)
         self.graph_module.create_widgets(main_column)
         self.visualization_module.create_widgets(main_column)
 
         self.preset_combo_box.current_item = 'Graphene'
-
         main_column.add_stretch()
 
         return scroll_area
@@ -126,6 +129,30 @@ class StructureRecognitionPanelDelegate(object):
         # if source_data_item.xdata.is_sequence:
         #     current_index = source_data_item._DataItem__display_item.display_data_channel.sequence_index
         #     data = data[current_index]
+
+    def get_camera(self):
+        return self.api.get_hardware_source_by_id('usim_scan_device', '1.0')
+
+    def update_parameters(self):
+        self.scale_detection_module.fetch_parameters()
+        # self.deep_learning_module.fetch_parameters()
+        # self.graph_module.fetch_parameters()
+        # self.visualization_module.fetch_parameters()
+
+    def check_can_analyse_live(self):
+        camera = self.get_camera()
+        return camera.is_playing
+
+    def start_live_analysis(self):
+        #self.check_can_analyse_live()
+        self.run_push_button.text = 'Abort live analysis'
+        self.pill2kill = threading.Event()
+        self.process_live()
+
+    def stop_live_analysis(self):
+        self.run_push_button.text = 'Start live analysis'
+        self.pill2kill.set()
+        #self.thread.join()
 
     def process_live(self):
         # def on_first_frame():
@@ -140,62 +167,61 @@ class StructureRecognitionPanelDelegate(object):
             xdata = self.api.create_data_and_metadata(dummy_data, data_descriptor=descriptor)
             self.output_data_item = self.api.library.create_data_item_from_data_and_metadata(xdata)
 
-        camera = self.api.get_hardware_source_by_id('usim_scan_device', '1.0')
-
-        self.scale_detection_module.fetch_parameters()
-        self.deep_learning_module.fetch_parameters()
-        self.graph_module.fetch_parameters()
-        self.visualization_module.fetch_parameters()
-
-        self.continue_live_analysis = True
+        print('start processing')
         with self.api.library.data_ref_for_data_item(self.output_data_item) as data_ref:
-            def thread_this():
+
+            def thread_this(pill2kill, camera):
                 i = 0
-                self.is_analysing = True
-                while camera.is_playing & self.continue_live_analysis:
+                while not pill2kill.is_set():
+                    #if not camera.is_playing:
+                    #    self.stop_live_analysis()
+
                     source_data = camera.grab_next_to_finish()
-                    image = source_data[0].data
+                    image = source_data[0].data.copy()
 
-                    sampling = self.scale_detection_module.detect_scale(image)
-                    preprocessed = self.deep_learning_module.preprocess_image(image, sampling)
+                    # sampling = self.scale_detection_module.detect_scale(image)
+                    # self.scale_detection_module.fetch_parameters()
+                    # print(self.scale_detection_module.min_sampling)
 
-                    density, classes = self.deep_learning_module.forward_pass(preprocessed)
+                    image[:100] = 0
 
-                    density = density.detach().numpy()
-                    classes = classes.detach().numpy()
-
-                    classes = merge_overlapping(classes, [2, 3])
-                    classes = merge_overlapping(classes, [3, 2])
-
-                    mask = gaussian(classes[:, :-1].sum(axis=1), 10) ** 2
-
-                    density = density * mask
-
-                    points, probabilities = self.deep_learning_module.nms(density, classes)
-                    points = self.deep_learning_module.postprocess_points(points, density.shape[2:], image.shape,
-                                                                          sampling)
-
-                    graph = self.graph_module.build_graph(points, sampling)
-                    rmsd = self.graph_module.register_faces(graph)
-                    rmsd = np.min(rmsd, axis=1)
-
-                    density = self.deep_learning_module.postprocess_image(density[0, 0], image.shape, sampling)
-                    classes = self.deep_learning_module.postprocess_image(
-                        np.argmax(classes[0], axis=0).astype(np.float),
-                        image.shape,
-                        sampling)
-
-                    visualization = self.visualization_module.create_visualization(image, density, classes, graph, rmsd,
-                                                                                   probabilities)
-
-                    data_ref.data = visualization
-
+                    data_ref.data = image
+                    print(i)
                     i += 1
 
-                self.is_analysing = False
-                self.continue_live_analysis = True
+                #     preprocessed = self.deep_learning_module.preprocess_image(image, sampling)
+                #
+                #     density, classes = self.deep_learning_module.forward_pass(preprocessed)
+                #
+                #     density = density.detach().numpy()
+                #     classes = classes.detach().numpy()
+                #
+                #     classes = merge_overlapping(classes, [2, 3])
+                #     classes = merge_overlapping(classes, [3, 2])
+                #
+                #     mask = gaussian(classes[:, :-1].sum(axis=1), 10) ** 2
+                #
+                #     density = density * mask
+                #
+                #     points, probabilities = self.deep_learning_module.nms(density, classes)
+                #     points = self.deep_learning_module.postprocess_points(points, density.shape[2:], image.shape,
+                #                                                           sampling)
+                #
+                #     graph = self.graph_module.build_graph(points, sampling)
+                #     rmsd = self.graph_module.register_faces(graph)
+                #     rmsd = np.min(rmsd, axis=1)
+                #
+                #     density = self.deep_learning_module.postprocess_image(density[0, 0], image.shape, sampling)
+                #     classes = self.deep_learning_module.postprocess_image(
+                #         np.argmax(classes[0], axis=0).astype(np.float),
+                #         image.shape,
+                #         sampling)
+                #
+                #     visualization = self.visualization_module.create_visualization(image, density, classes, graph, rmsd,
+                #                                                                    probabilities)
 
-        self.thread = threading.Thread(target=thread_this).start()
+        self.thread = threading.Thread(target=thread_this, args=(self.pill2kill, self.get_camera()))
+        self.thread.start()
 
 
 class StructureRecognitionExtension(object):

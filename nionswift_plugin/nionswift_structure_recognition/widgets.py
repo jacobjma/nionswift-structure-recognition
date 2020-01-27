@@ -8,12 +8,12 @@ def line_edit_template(ui, label, default_text=None, placeholder_text=None):
     widget = ui.create_line_edit_widget()
     row.add(widget)
     row.add_spacing(5)
-    widget._widget._behavior.placeholder_text = placeholder_text
+    #widget._widget._behavior.placeholder_text = placeholder_text
     widget.text = default_text
     return row, widget
 
 
-def push_button_template(ui, label, callback):
+def push_button_template(ui, label, callback=None):
     row = ui.create_row_widget()
     widget = ui.create_push_button_widget(label)
     widget.on_clicked = callback
