@@ -7,7 +7,7 @@ from nion.swift import DocumentController
 from nion.swift.Facade import UserInterface
 from nion.swift.model import DocumentModel
 from nion.ui import TestUI
-
+import os
 from nionswift_plugin.nionswift_structure_recognition.dl import DeepLearningModule
 from nionswift_plugin.nionswift_structure_recognition.scale import ScaleDetectionModule
 from nionswift_plugin.nionswift_structure_recognition.visualization import VisualizationModule
@@ -30,12 +30,13 @@ def create_data(extent, gpts, background=1.):
 
 @pytest.fixture(scope="session", autouse=True)
 def test_data_1():
+    path = os.path.join(os.path.dirname(__file__), 'test_data_1.npz')
     try:
-        npzfile = np.load('test_data_1.npz')
+        npzfile = np.load(path)
         data = {key: npzfile[key] for key in npzfile.keys()}
     except:
         data = create_data(40, 512, 2)
-        np.savez('test_data_1.npz', **data)
+        np.savez(path, **data)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     data['image'] = torch.tensor(data['image']).to(device)
@@ -45,12 +46,13 @@ def test_data_1():
 
 @pytest.fixture(scope="session", autouse=True)
 def test_data_2():
+    path = os.path.join(os.path.dirname(__file__), 'test_data_1.npz')
     try:
-        npzfile = np.load('test_data_2.npz')
+        npzfile = np.load(path)
         data = {key: npzfile[key] for key in npzfile.keys()}
     except:
         data = create_data(20, 512, 2)
-        np.savez('test_data_2.npz', **data)
+        np.savez(path, **data)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     data['image'] = torch.tensor(data['image']).to(device)
