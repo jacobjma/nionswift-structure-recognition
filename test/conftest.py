@@ -1,9 +1,7 @@
 import numpy as np
 import pytest
 import torch
-from abtem.learn.dataset import gaussian_marker_labels
-from abtem.learn.structures import graphene_like, random_add_contamination
-from abtem.points import fill_rectangle, rotate
+
 from nion.swift import Application
 from nion.swift import DocumentController
 from nion.swift.Facade import UserInterface
@@ -16,6 +14,9 @@ from nionswift_plugin.nionswift_structure_recognition.visualization import Visua
 
 
 def create_data(extent, gpts, background=1.):
+    from abtem.learn.dataset import gaussian_marker_labels
+    from abtem.learn.structures import graphene_like, random_add_contamination
+    from abtem.points import fill_rectangle, rotate
     np.random.seed(7)
     points = graphene_like(a=2.46, labels=[0, 0])
     points = rotate(points, np.random.rand() * 360., rotate_cell=True)
