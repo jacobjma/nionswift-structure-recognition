@@ -138,11 +138,11 @@ class StructureRecognitionPanelDelegate:
 
                     source_data = camera.grab_next_to_finish()  # TODO: This starts scanning? Must be a bug.
 
-                    images = source_data[0].data.copy()
-                    orig_shape = images.shape[-2:]
+                    orig_images = source_data[0].data.copy()
+                    orig_shape = orig_images.shape[-2:]
 
                     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-                    images = torch.tensor(images).to(device)
+                    images = torch.tensor(orig_images).to(device)
 
                     sampling = self.scale_detection_module.detect_scale(images)
                     print('detected sampling:', sampling)
@@ -173,7 +173,7 @@ class StructureRecognitionPanelDelegate:
                     classes = self.deep_learning_module.postprocess_images(classes, orig_shape, sampling)
 
                     #visualization = self.visualization_module.create_background(source_data[0].data, classes, density)
-                    visualization = self.visualization_module.create_background(source_data[0].data, classes, density)
+                    visualization = self.visualization_module.create_background(orig_images, classes, density)
                     visualization = self.visualization_module.add_points(visualization, points)
 
                     data_ref.data = visualization
