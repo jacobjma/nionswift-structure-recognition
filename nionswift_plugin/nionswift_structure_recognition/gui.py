@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .dl import DeepLearningModule
+from .dl import DeepLearningModule, pad_to_size
 # from .graph import GraphModule
 from .scale import ScaleDetectionModule
 from .visualization import VisualizationModule
@@ -87,7 +87,10 @@ class StructureRecognitionPanelDelegate:
         #     data = data[current_index]
 
     def get_camera(self):
-        return self.api.get_hardware_source_by_id('usim_scan_device', '1.0')
+        #return self.api.get_instrument_by_id("autostem_controller",version="1")
+        return self.api.get_hardware_source_by_id("superscan",version="1")
+        #return self.api.get_hardware_source_by_id("nion1010",version="1")
+        #return self.api.get_hardware_source_by_id('usim_scan_device', '1.0')
 
     def update_parameters(self):
         self.scale_detection_module.fetch_parameters()
@@ -142,16 +145,19 @@ class StructureRecognitionPanelDelegate:
                     images = torch.tensor(images).to(device)
 
                     sampling = self.scale_detection_module.detect_scale(images)
+                    print('detected sampling:', sampling)
+                    
                     images = self.deep_learning_module.reshape_images(images)
                     images = self.deep_learning_module.rescale_images(images, sampling)
                     images = self.deep_learning_module.normalize_images(images)
+                    images = pad_to_size(images, images.shape[2], images.shape[3], n=16)
 
                     classes = nn.Softmax(1)(self.deep_learning_module.mask_model(images))
                     mask = torch.sum(classes[:, :-1], dim=1)[:, None]
 
                     images = self.deep_learning_module.normalize_images(images, mask)
                     density = nn.Sigmoid()(self.deep_learning_module.density_model(images))
-
+                    
                     density = density * mask
                     density = density.detach().cpu().numpy()
 
@@ -166,6 +172,7 @@ class StructureRecognitionPanelDelegate:
 
                     classes = self.deep_learning_module.postprocess_images(classes, orig_shape, sampling)
 
+                    #visualization = self.visualization_module.create_background(source_data[0].data, classes, density)
                     visualization = self.visualization_module.create_background(source_data[0].data, classes, density)
                     visualization = self.visualization_module.add_points(visualization, points)
 
