@@ -1,13 +1,10 @@
-import numba as nb
 import numpy as np
 
 
-@nb.njit
 def sub2ind(rows, cols, array_shape):
     return rows * array_shape[1] + cols
 
 
-@nb.njit
 def ind2sub(array_shape, ind):
     rows = (np.int32(ind) // array_shape[1])
     cols = (np.int32(ind) % array_shape[1])

@@ -3,10 +3,10 @@ import os
 import numpy as np
 import torch
 import torch.nn.functional as F
-from skimage.transform import rescale
+from scipy.ndimage import zoom
 
 from .unet import UNet
-from .utils import StructureRecognitionModule
+from .utils import StructureRecognitionModule, ind2sub, sub2ind
 from .widgets import Section, line_edit_template
 
 presets = {'graphene':
@@ -52,16 +52,6 @@ def weighted_normalization(images, mask=None):
         torch.sum(mask * (images - weighted_means) ** 2, dim=(-1, -2), keepdim=True) /
         torch.sum(mask, dim=(-1, -2), keepdim=True))
     return (images - weighted_means) / weighted_stds
-
-
-def sub2ind(rows, cols, array_shape):
-    return rows * array_shape[1] + cols
-
-
-def ind2sub(array_shape, ind):
-    rows = ind // array_shape[1]
-    cols = ind % array_shape[1]
-    return (rows, cols)
 
 
 def non_maximum_suppresion(density, distance, threshold, classes=None):
@@ -186,7 +176,7 @@ class DeepLearningModule(StructureRecognitionModule):
         return weighted_normalization(images, mask)
 
     def postprocess_images(self, image, original_shape, sampling):
-        image = rescale(image, self.training_sampling / sampling, multichannel=False, anti_aliasing=False)
+        image = zoom(image, self.training_sampling / sampling)
         shape = image.shape
         padding = (shape[0] - original_shape[0], shape[1] - original_shape[1])
         image = image[padding[0] // 2: padding[0] // 2 + original_shape[0],

@@ -1,8 +1,6 @@
-import numpy as np
 import torch
 import torch.nn as nn
 
-from abtem.utils import BatchGenerator
 
 
 class DoubleConv(nn.Module):
@@ -102,36 +100,3 @@ class UNet(nn.Module):
         x = self.out1(x)
         x = self.out2(x)
         return x
-
-    def get_device(self):
-        return next(self.parameters()).device
-
-    def predict_series(self, images, max_batch, num_samples=1):
-        batch_generator = BatchGenerator(len(images), max_batch)
-
-        if num_samples > 1:
-            outputs = (np.zeros((images.shape[0],) + (self.out_channels,) + images.shape[2:], dtype=np.float32),
-                       np.zeros((images.shape[0],) + (self.out_channels,) + images.shape[2:], dtype=np.float32))
-            forward = lambda x: (self.mc_predict(x, num_samples=num_samples),)
-        else:
-            outputs = (np.zeros((images.shape[0],) + (self.out_channels,) + images.shape[2:], dtype=np.float32),)
-            forward = lambda x: (self.forward(x),)
-
-        for start, size in batch_generator.generate():
-            batch_outputs = forward(images[start:start + size])
-
-            for i, batch_output in enumerate(batch_outputs):
-                outputs[i][start:start + size] = batch_output.detach().cpu().numpy()
-
-        return outputs
-
-    def mc_predict(self, images, num_samples):
-        mc_output = np.zeros((num_samples,) + (images.shape[0],) + (self.out_channels,) + images.shape[2:])
-
-        for i in range(num_samples):
-            outputs = self.forward(images)
-            mc_output[i] = outputs.cpu().detach().numpy()
-
-        return np.mean(mc_output, 0), np.std(mc_output, 0)
-
-

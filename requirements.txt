@@ -1,8 +1,7 @@
 numpy
-numba
 torch
 torchvision
-scikit-image
-scikit-learn
+scipy
 opencv-python
 matplotlib
+pytest
