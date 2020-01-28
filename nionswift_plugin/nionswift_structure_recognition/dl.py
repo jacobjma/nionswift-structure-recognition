@@ -200,7 +200,7 @@ class DeepLearningModule(StructureRecognitionModule):
         return points - np.array([padding[0] // 2, padding[1] // 2])
 
     def load_model(self):
-        models_dir = os.path.join(os.path.join(os.path.join(os.path.dirname(__file__), '..'), '..'), 'models')
+        models_dir = os.path.join(os.path.dirname(__file__), 'models')
         density_weights = os.path.join(models_dir, self.density_weights_line_edit.text)
         mask_weights = os.path.join(models_dir, self.mask_weights_line_edit.text)
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
