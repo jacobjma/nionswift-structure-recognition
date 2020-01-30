@@ -124,6 +124,7 @@ class DeepLearningModule(StructureRecognitionModule):
         self.training_sampling = None
         self.mask_model = None
         self.density_model = None
+        self.nms_distance = None
 
     def create_widgets(self, column):
         section = Section(self.ui, 'Deep learning')
@@ -132,9 +133,9 @@ class DeepLearningModule(StructureRecognitionModule):
         # model_row, self.model_line_edit = line_edit_template(self.ui, 'Model')
         mask_weights_row, self.mask_weights_line_edit = line_edit_template(self.ui, 'Mask weights')
         density_weights_row, self.density_weights_line_edit = line_edit_template(self.ui, 'Density weights')
-        training_scale_row, self.training_sampling_line_edit = line_edit_template(self.ui, 'Training sampling [nm]')
-        margin_row, self.margin_line_edit = line_edit_template(self.ui, 'Margin [nm]')
-        nms_distance_row, self.nms_distance_line_edit = line_edit_template(self.ui, 'NMS distance [nm]')
+        training_scale_row, self.training_sampling_line_edit = line_edit_template(self.ui, 'Training sampling [A]')
+        margin_row, self.margin_line_edit = line_edit_template(self.ui, 'Margin [A]')
+        nms_distance_row, self.nms_distance_line_edit = line_edit_template(self.ui, 'NMS distance [A]')
         nms_threshold_row, self.nms_threshold_line_edit = line_edit_template(self.ui, 'NMS threshold')
 
         # section.column.add(model_row)
@@ -169,7 +170,6 @@ class DeepLearningModule(StructureRecognitionModule):
     def rescale_images(self, images, sampling):
         scale_factor = sampling / self.training_sampling
         images = F.interpolate(images, scale_factor=scale_factor, mode='nearest')
-        images = pad_to_size(images, images.shape[2], images.shape[3], n=16)
         return images
 
     def normalize_images(self, images, mask=None):
