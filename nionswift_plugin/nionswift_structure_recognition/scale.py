@@ -6,17 +6,7 @@ import torch
 
 from .utils import StructureRecognitionModule
 from .widgets import Section, line_edit_template, combo_box_template
-
-presets = {'graphene':
-               {'crystal_system': 'hexagonal',
-                'lattice_constant': 2.46,
-                'min_sampling': 0.015,
-                }
-           }
-
-
-
-
+from .model import
 
 class ScaleDetectionModule(StructureRecognitionModule):
 

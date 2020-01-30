@@ -6,20 +6,9 @@ import torch.nn.functional as F
 from scipy.ndimage import zoom
 
 from .unet import UNet
+from .model import build_model_from_dict, presets
 from .utils import StructureRecognitionModule
 from .widgets import Section, line_edit_template
-
-presets = {'graphene':
-               {'mask_weights_file': 'graphene_mask.pt',
-                'density_weights_file': 'graphene_density.pt',
-                'training_sampling': '0.05859375',
-                'margin': '2',
-                'nms_distance': '1',
-                'nms_threshold': '0.5',
-                }
-           }
-
-
 
 
 class DeepLearningModule(StructureRecognitionModule):
@@ -112,16 +101,6 @@ class DeepLearningModule(StructureRecognitionModule):
     def forward_pass(self, preprocessed_image):
         density, classes = self.model(preprocessed_image)
         return density, classes
-
-    def nms(self, density, classes=None):
-        nms_distance_pixels = int(np.round(self.nms_distance / self.training_sampling))
-
-        accepted = non_maximum_suppresion(density, distance=nms_distance_pixels,
-                                          threshold=self.nms_threshold, classes=classes)
-
-        points = np.array(np.where(accepted[0])).T
-        # probabilities = probabilities[0, :, points[:, 0], points[:, 1]]
-        return points  # , probabilities
 
     def fetch_parameters(self):
         self.training_sampling = float(self.training_sampling_line_edit.text)
