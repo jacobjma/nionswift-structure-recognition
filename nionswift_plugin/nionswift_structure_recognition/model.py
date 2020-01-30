@@ -1,12 +1,140 @@
-<<<<<<< HEAD
+import functools
+import os
+from bisect import bisect_left
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
-from abtem.learn.postprocess import non_maximum_suppresion
-from abtem.learn.preprocess import pad_to_size, weighted_normalization
 
 from .unet import UNet
+
+presets = {'graphene': {'training_sampling': 0.05859375,
+                        'mask_model': {'in_channels': 1,
+                                       'out_channels': 3,
+                                       'init_features': 32,
+                                       'weights': 'graphene_mask.pt',
+                                       'activation': nn.Softmax(1)},
+                        'density_model': {'in_channels': 1,
+                                          'out_channels': 1,
+                                          'init_features': 32,
+                                          'weights': 'graphene_density.pt',
+                                          'activation': nn.Sigmoid()},
+                        'scale': {'crystal_system': 'hexagonal',
+                                  'lattice_constant': 2.46,
+                                  'min_sampling': .015
+                                  },
+                        'nms': {'distance': 1.2,
+                                'threshold': 0.5}
+
+                        }}
+
+
+def sub2ind(rows, cols, array_shape):
+    return rows * array_shape[1] + cols
+
+
+def ind2sub(array_shape, ind):
+    rows = (np.int32(ind) // array_shape[1])
+    cols = (np.int32(ind) % array_shape[1])
+    return (rows, cols)
+
+
+def closest_multiple_ceil(n, m):
+    return int(np.ceil(n / m) * m)
+
+
+def pad_to_size(images, height, width, n=None):
+    if n is not None:
+        height = closest_multiple_ceil(height, n)
+        width = closest_multiple_ceil(width, n)
+
+    shape = images.shape[-2:]
+
+    up = (height - shape[0]) // 2
+    down = height - shape[0] - up
+    left = (width - shape[1]) // 2
+    right = width - shape[1] - left
+    images = F.pad(images, pad=[up, down, left, right])
+    return images
+
+
+def normalize_global(images):
+    return (images - torch.mean(images, dim=(-2, -1), keepdim=True)) / torch.std(images, dim=(-2, -1), keepdim=True)
+
+
+def weighted_normalization(images, mask=None):
+    if mask is None:
+        return normalize_global(images)
+
+    weighted_means = torch.sum(images * mask, dim=(-1, -2), keepdim=True) / torch.sum(mask, dim=(-1, -2), keepdim=True)
+    weighted_stds = torch.sqrt(
+        torch.sum(mask * (images - weighted_means) ** 2, dim=(-1, -2), keepdim=True) /
+        torch.sum(mask, dim=(-1, -2), keepdim=True))
+    return (images - weighted_means) / weighted_stds
+
+
+def non_maximum_suppresion(density, distance, threshold, classes=None):
+    shape = density.shape[2:]
+
+    density = density.reshape((density.shape[0], -1))
+
+    if classes is not None:
+        classes = classes.reshape(classes.shape[:2] + (-1,))
+        probabilities = np.zeros(classes.shape, dtype=classes.dtype)
+
+    accepted = np.zeros(density.shape, dtype=np.bool_)
+    suppressed = np.zeros(density.shape, dtype=np.bool_)
+
+    x_disc = np.zeros((2 * distance + 1, 2 * distance + 1), dtype=np.int32)
+
+    x_disc[:] = np.linspace(0, 2 * distance, 2 * distance + 1)
+    y_disc = x_disc.copy().T
+    x_disc -= distance
+    y_disc -= distance
+    x_disc = x_disc.ravel()
+    y_disc = y_disc.ravel()
+
+    r2 = x_disc ** 2 + y_disc ** 2
+
+    x_disc = x_disc[r2 < distance ** 2]
+    y_disc = y_disc[r2 < distance ** 2]
+
+    weights = np.exp(-r2 / (2 * (distance / 3) ** 2))
+    weights = np.reshape(weights[r2 < distance ** 2], (-1, 1))
+
+    for i in range(density.shape[0]):
+        suppressed[i][density[i] < threshold] = True
+        for j in np.argsort(-density[i].ravel()):
+            if not suppressed[i, j]:
+                accepted[i, j] = True
+
+                x, y = ind2sub(shape, j)
+                neighbors_x = x + x_disc
+                neighbors_y = y + y_disc
+
+                valid = ((neighbors_x > -1) & (neighbors_y > -1) & (neighbors_x < shape[0]) & (
+                        neighbors_y < shape[1]))
+
+                neighbors_x = neighbors_x[valid]
+                neighbors_y = neighbors_y[valid]
+
+                k = sub2ind(neighbors_x, neighbors_y, shape)
+                suppressed[i][k] = True
+
+                if classes is not None:
+                    tmp = np.sum(classes[i, :, k] * weights[valid], axis=0)
+                    probabilities[i, :, j] = tmp / np.sum(tmp)
+
+    accepted = accepted.reshape((density.shape[0],) + shape)
+
+    if classes is not None:
+        probabilities = probabilities.reshape(classes.shape[:2] + shape)
+        return accepted, probabilities
+
+    else:
+        return accepted
+
 
 def polar_labels(shape, inner=1, outer=None, nbins_angular=32, nbins_radial=None):
     if outer is None:
@@ -115,31 +243,6 @@ def soft_border(shape, k):
     return f(shape[0], k)[:, None] * f(shape[1], k)[None]
 
 
-def nms(array, n, margin=0):
-    top = torch.argsort(array.view(-1), descending=True)
-    accepted = torch.zeros((n, 2), dtype=np.long)
-    marked = torch.zeros((array.shape[0] + 2 * margin, array.shape[1] + 2 * margin), dtype=torch.bool)
-
-    i = 0
-    j = 0
-    while j < n:
-        idx = torch.tensor((top[i] // array.shape[1], top[i] % array.shape[1]))
-
-        if marked[idx[0] + margin, idx[1] + margin] == False:
-            marked[idx[0]:idx[0] + 2 * margin, idx[1]:idx[1] + 2 * margin] = True
-            marked[margin:2 * margin] += marked[-margin:]
-            marked[-2 * margin:-margin] += marked[:margin]
-
-            accepted[j] = idx
-            j += 1
-
-        i += 1
-        if i >= torch.numel(array) - 1:
-            break
-
-    return accepted
-
-
 def find_hexagonal_sampling(image, a, min_sampling, bins_per_spot=16):
     if len(image.shape) == 2:
         image = image[None]
@@ -175,6 +278,30 @@ def find_hexagonal_sampling(image, a, min_sampling, bins_per_spot=16):
     unrolled = (f.view(-1)[indices] * weights).sum(-1)
     unrolled = unrolled.view((6, -1, unrolled.shape[1])).sum(0)
 
+    def nms(array, n, margin=0):
+        top = torch.argsort(array.view(-1), descending=True)
+        accepted = torch.zeros((n, 2), dtype=np.long)
+        marked = torch.zeros((array.shape[0] + 2 * margin, array.shape[1] + 2 * margin), dtype=torch.bool)
+
+        i = 0
+        j = 0
+        while j < n:
+            idx = torch.tensor((top[i] // array.shape[1], top[i] % array.shape[1]))
+
+            if marked[idx[0] + margin, idx[1] + margin] == False:
+                marked[idx[0]:idx[0] + 2 * margin, idx[1]:idx[1] + 2 * margin] = True
+                marked[margin:2 * margin] += marked[-margin:]
+                marked[-2 * margin:-margin] += marked[:margin]
+
+                accepted[j] = idx
+                j += 1
+
+            i += 1
+            if i >= torch.numel(array) - 1:
+                break
+
+        return accepted
+
     normalized = unrolled / unrolled.mean(0)
     peaks = nms(normalized, 5, 3)
 
@@ -186,26 +313,32 @@ def find_hexagonal_sampling(image, a, min_sampling, bins_per_spot=16):
 
     return (r * a / float(N) * np.sqrt(3.) / 2.).item()
 
-def build_unet_model(parameters, device):
+
+def build_unet_model(parameters):
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
     model = UNet(in_channels=parameters['in_channels'],
                  out_channels=parameters['out_channels'],
                  init_features=parameters['init_features'],
                  dropout=0.)
-    model.load_state_dict(torch.load(parameters['weights_file'], map_location=device))
-    return model
+
+    weights_file = os.path.join(os.path.join(os.path.dirname(__file__), 'models'), parameters['weights'])
+    model.load_state_dict(torch.load(weights_file, map_location=device))
+    return lambda x: parameters['activation'](model(x))
 
 
 def build_model_from_dict(parameters):
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-
-    mask_model = build_unet_model(parameters=parameters['mask_model'], device=device)
-    density_model = build_unet_model(parameters=parameters['density_model'], device=device)
+    mask_model = build_unet_model(parameters=parameters['mask_model'])
+    density_model = build_unet_model(parameters=parameters['density_model'])
 
     if parameters['scale']['crystal_system'] == 'hexagonal':
         scale_model = lambda x: find_hexagonal_sampling(x, a=parameters['scale']['lattice_constant'],
                                                         min_sampling=parameters['scale']['min_sampling'])
     else:
         raise NotImplementedError('')
+
+    def preprocess(images):
+        pass
 
     def discretization_model(density):
         nms_distance_pixels = int(np.round(parameters['nms']['distance'] / parameters['training_sampling']))
@@ -220,13 +353,14 @@ def build_model_from_dict(parameters):
     model = AtomRecognitionModel(mask_model, density_model, training_sampling=parameters['training_sampling'],
                                  scale_model=scale_model, discretization_model=discretization_model)
 
-
+    return model
 
 
 class AtomRecognitionModel:
 
     def __init__(self, mask_model, density_model, training_sampling, scale_model, discretization_model):
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        # self.preprocessing = preprocessing
         self.mask_model = mask_model
         self.density_model = density_model
         self.training_sampling = training_sampling
@@ -245,7 +379,7 @@ class AtomRecognitionModel:
     def rescale_images(self, images, sampling):
         scale_factor = sampling / self.training_sampling
         images = F.interpolate(images, scale_factor=scale_factor, mode='nearest')
-        images = pad_to_size(images, images.shape[2], images.shape[3], n=16)
+
         return images
 
     def normalize_images(self, images, mask=None):
@@ -265,13 +399,14 @@ class AtomRecognitionModel:
         points = points * self.training_sampling / sampling
         return points - np.array([padding[0] // 2, padding[1] // 2])
 
-    def forward(self, images):
+    def predict(self, images):
         images = torch.tensor(images).to(self.device)
         images = self.standardize_dims(images)
         orig_shape = images.shape[-2:]
         sampling = self.scale_model(images)
         images = self.rescale_images(images, sampling)
         images = self.normalize_images(images)
+        images = pad_to_size(images, images.shape[2], images.shape[3], n=16)
         mask = self.mask_model(images)
         mask = torch.sum(mask[:, :-1], dim=1)[:, None]
         images = self.normalize_images(images, mask)
@@ -279,5 +414,6 @@ class AtomRecognitionModel:
         density = mask * density
         density = density.detach().cpu().numpy()
         points = self.discretization_model(density)
-        points = [self.postprocess_points(p, density.shape[-2:], orig_shape, sampling) for p in points]
+        points = self.postprocess_points(points, density.shape[-2:], orig_shape, sampling)
+        #points = [self.postprocess_points(p, density.shape[-2:], orig_shape, sampling) for p in points]
         return points

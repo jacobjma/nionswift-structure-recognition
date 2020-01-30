@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .dl import DeepLearningModule, pad_to_size
+from .dl import DeepLearningModule
 # from .graph import GraphModule
 from .scale import ScaleDetectionModule
 from .visualization import VisualizationModule
