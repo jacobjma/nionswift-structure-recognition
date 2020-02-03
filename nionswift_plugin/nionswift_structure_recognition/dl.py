@@ -1,7 +1,6 @@
+from .model import build_model_from_dict, presets
 from .utils import StructureRecognitionModule
 from .widgets import Section, line_edit_template
-from .model import build_model_from_dict, presets
-
 
 
 class DeepLearningModule(StructureRecognitionModule):

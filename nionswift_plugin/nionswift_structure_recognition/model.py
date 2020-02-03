@@ -325,6 +325,7 @@ def build_unet_model(parameters):
 
     weights_file = os.path.join(os.path.join(os.path.dirname(__file__), 'models'), parameters['weights'])
     model.load_state_dict(torch.load(weights_file, map_location=device))
+    model.to(device)
     return lambda x: parameters['activation'](model(x))
 
 
@@ -422,5 +423,5 @@ class AtomRecognitionModel:
 
         points = self.discretization_model(density)
         points = self.postprocess_points(points, density.shape[-2:], orig_shape, sampling)
-        #points = [self.postprocess_points(p, density.shape[-2:], orig_shape, sampling) for p in points]
-        return points
+        # points = [self.postprocess_points(p, density.shape[-2:], orig_shape, sampling) for p in points]
+        return points[:, ::-1]
