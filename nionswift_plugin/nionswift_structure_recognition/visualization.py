@@ -3,7 +3,7 @@ import matplotlib
 import numpy as np
 from matplotlib import colors as mcolors
 
-from .utils import StructureRecognitionModule
+from .widgets import StructureRecognitionModule
 from .widgets import Section, combo_box_template, check_box_template, line_edit_template
 
 named_colors = dict(mcolors.BASE_COLORS, **mcolors.CSS4_COLORS)
@@ -101,7 +101,6 @@ class VisualizationModule(StructureRecognitionModule):
         section.column.add_spacing(5)
 
         def points_check_box_changed(checked):
-
             points_settings_column._widget.remove_all()
             points_color_column._widget.remove_all()
 
@@ -253,64 +252,26 @@ class VisualizationModule(StructureRecognitionModule):
 
         return visualization
 
-    # def create_visualization(self, image, density, points):
-    #
-    #     # canvas = (0, extent[0], 0, extent[1])
-    #     # shape = image.shape
-    #     # points = points[:, ::]
-    #     # points = scale_points_to_canvas(points, canvas, shape)
-    #
-    #     if self.background == 'image':
-    #         visualization = ((image - image.min()) / image.ptp() * 255).astype(np.uint8)
-    #         visualization = np.tile(visualization[..., None], (1, 1, 3))
-    #
-    #     elif self.background == 'density':
-    #         visualization = (density * 255).astype(np.uint8)
-    #         visualization = np.tile(visualization[..., None], (1, 1, 3))
-    #
-    #     # elif self.background == 'classes':
-    #     #     visualization = (classes / 3 * 255).astype(np.uint8)
-    #     #     visualization = np.tile(visualization[..., None], (1, 1, 3))
-    #
-    #     elif self.background == 'solid':
-    #         visualization = None
-    #
-    #     else:
-    #         raise RuntimeError()
-    #
-    #     # if self.overlay_faces:
-    #     #     if self.faces_color == 'size':
-    #     #         colors = graph.faces().sizes()
-    #     #         vmin = 0
-    #     #         vmax = 10
-    #     #
-    #     #     elif self.faces_color == 'rmsd':
-    #     #         colors = rmsd
-    #     #         vmin = 0
-    #     #         vmax = np.max(rmsd[rmsd != np.inf])
-    #     #
-    #     #     else:
-    #     #         raise RuntimeError()
-    #     #
-    #     #     colors = (get_colors_from_cmap(colors, self.faces_cmap, vmin, vmax) * 255).astype(int)
-    #     #
-    #     #     visualization = add_faces(graph.points, graph.faces()[:-1], visualization, colors)
-    #
-    #     # if self.overlay_graph:
-    #     #     visualization = add_edges(graph.points, graph.edges(), visualization, (0, 0, 0), self.line_width)
-    #
-    #     if self.overlay_points:
-    #         if self.points_color == 'solid':
-    #             color = mcolors.to_rgba(named_colors[self.points_color_solid])[:3]
-    #             colors = [tuple([int(x * 255) for x in color[::-1]])] * len(points)
-    #
-    #         # elif self.points_color == 'class':
-    #         #     colors = (get_colors_from_cmap(probabilities[:, 2], 'autumn', vmin=0, vmax=1) * 255).astype(int)
-    #         #     colors = colors[:, :-1][:, ::-1]
-    #
-    #         else:
-    #             raise NotImplementedError()
-    #
-    #         visualization = add_points(points, visualization, self.points_size, colors)
-    #
-    #     return visualization
+    def add_edges(self, visualization):
+        pass
+        #return add_edges(graph.points, graph.edges(), visualization, (0, 0, 0), self.line_width)
+
+    def add_faces(self, visualization):
+        pass
+        # if self.overlay_faces:
+        #     if self.faces_color == 'size':
+        #         colors = graph.faces().sizes()
+        #         vmin = 0
+        #         vmax = 10
+        #
+        #     elif self.faces_color == 'rmsd':
+        #         colors = rmsd
+        #         vmin = 0
+        #         vmax = np.max(rmsd[rmsd != np.inf])
+        #
+        #     else:
+        #         raise RuntimeError()
+        #
+        #     colors = (get_colors_from_cmap(colors, self.faces_cmap, vmin, vmax) * 255).astype(int)
+        #
+        #     visualization = add_faces(graph.points, graph.faces()[:-1], visualization, colors)

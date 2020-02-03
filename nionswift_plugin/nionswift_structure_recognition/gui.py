@@ -2,16 +2,95 @@ import gettext
 import threading
 
 import numpy as np
-import torch
-import torch.nn as nn
 
-from .dl import DeepLearningModule
-# from .graph import GraphModule
-from .scale import ScaleDetectionModule
+from .model import presets, build_model_from_dict
 from .visualization import VisualizationModule
-from .widgets import ScrollArea, push_button_template, combo_box_template
+from .widgets import ScrollArea, push_button_template, combo_box_template, StructureRecognitionModule, \
+    line_edit_template, Section
 
 _ = gettext.gettext
+
+
+class ScaleDetectionModule(StructureRecognitionModule):
+
+    def __init__(self, ui, document_controller):
+        super().__init__(ui, document_controller)
+
+        self.crystal_system = None
+        self.lattice_constant = None
+
+    def create_widgets(self, column):
+        section = Section(self.ui, 'Scale detection')
+        column.add(section)
+
+        lattice_constant_row, self.lattice_constant_line_edit = line_edit_template(self.ui, 'Lattice constant [Å]')
+        min_sampling_row, self.min_sampling_line_edit = line_edit_template(self.ui, 'Min. sampling [Å / pixel]')
+        crystal_system_row, self.crystal_system_combo_box = combo_box_template(self.ui, 'Crystal system', ['Hexagonal'])
+
+        section.column.add(crystal_system_row)
+        section.column.add(lattice_constant_row)
+        section.column.add(min_sampling_row)
+
+    def set_preset(self, name):
+        self.crystal_system_combo_box.current_item = presets[name]['scale']['crystal_system']
+        self.lattice_constant_line_edit.text = presets[name]['scale']['lattice_constant']
+        self.min_sampling_line_edit.text = presets[name]['scale']['min_sampling']
+
+    def fetch_parameters(self):
+        self.crystal_system = self.crystal_system_combo_box._widget.current_item.lower()
+        self.lattice_constant = float(self.lattice_constant_line_edit._widget.text)
+        self.min_sampling = float(self.min_sampling_line_edit._widget.text)
+
+
+class DeepLearningModule(StructureRecognitionModule):
+
+    def __init__(self, ui, document_controller):
+        super().__init__(ui, document_controller)
+
+        self.training_sampling = None
+        self.mask_model = None
+        self.density_model = None
+        self.nms_distance = None
+
+    def create_widgets(self, column):
+        section = Section(self.ui, 'Deep learning')
+        column.add(section)
+
+        # model_row, self.model_line_edit = line_edit_template(self.ui, 'Model')
+        mask_weights_row, self.mask_weights_line_edit = line_edit_template(self.ui, 'Mask weights')
+        density_weights_row, self.density_weights_line_edit = line_edit_template(self.ui, 'Density weights')
+        training_scale_row, self.training_sampling_line_edit = line_edit_template(self.ui, 'Training sampling [A]')
+        margin_row, self.margin_line_edit = line_edit_template(self.ui, 'Margin [A]')
+        nms_distance_row, self.nms_distance_line_edit = line_edit_template(self.ui, 'NMS distance [A]')
+        nms_threshold_row, self.nms_threshold_line_edit = line_edit_template(self.ui, 'NMS threshold')
+
+        # section.column.add(model_row)
+        section.column.add(mask_weights_row)
+        section.column.add(density_weights_row)
+        section.column.add(training_scale_row)
+        section.column.add(margin_row)
+        section.column.add(nms_distance_row)
+        section.column.add(nms_threshold_row)
+
+    def set_preset(self, name):
+        # self.model_line_edit.text = presets[name]['model_file']
+        self.mask_weights_line_edit.text = presets[name]['mask_model']['weights']
+        self.density_weights_line_edit.text = presets[name]['density_model']['weights']
+        self.training_sampling_line_edit.text = presets[name]['training_sampling']
+        self.margin_line_edit.text = presets[name]['margin']
+        self.nms_distance_line_edit.text = presets[name]['nms']['distance']
+        self.nms_threshold_line_edit.text = presets[name]['nms']['threshold']
+
+    def forward_pass(self, preprocessed_image):
+        density, classes = self.model(preprocessed_image)
+        return density, classes
+
+    def fetch_parameters(self):
+        self.training_sampling = float(self.training_sampling_line_edit.text)
+        self.margin = float(self.margin_line_edit.text)
+        self.nms_distance = float(self.nms_distance_line_edit.text)
+        self.nms_threshold = float(self.nms_threshold_line_edit.text)
+        self.model = build_model_from_dict(presets['graphene'])
 
 
 class StructureRecognitionPanelDelegate:
@@ -88,9 +167,14 @@ class StructureRecognitionPanelDelegate:
 
     def get_camera(self):
         # return self.api.get_instrument_by_id("autostem_controller",version="1")
-        # return self.api.get_hardware_source_by_id("superscan",version="1")
+
+        camera = self.api.get_hardware_source_by_id("superscan", version="1")
+        if camera is None:
+            camera = self.api.get_hardware_source_by_id('usim_scan_device', '1.0')
+
+        return camera
         # return self.api.get_hardware_source_by_id("nion1010",version="1")
-        return self.api.get_hardware_source_by_id('usim_scan_device', '1.0')
+        # return self.api.get_hardware_source_by_id('usim_scan_device', '1.0')
 
     def update_parameters(self):
         self.scale_detection_module.fetch_parameters()
@@ -141,9 +225,9 @@ class StructureRecognitionPanelDelegate:
                     source_data = camera.grab_next_to_finish()  # TODO: This starts scanning? Must be a bug.
 
                     orig_images = source_data[0].data.copy()
-                    # orig_shape = orig_images.shape[-2:]
-
                     points = model.predict(orig_images)
+
+                    #self.output_data_item.title = 'Analysis of ' + camera.get_property_as_str('name')
 
                     visualization = self.visualization_module.create_background(orig_images,
                                                                                 model.last_density,

@@ -8,7 +8,7 @@ def line_edit_template(ui, label, default_text=None, placeholder_text=None):
     widget = ui.create_line_edit_widget()
     row.add(widget)
     row.add_spacing(5)
-    #widget._widget._behavior.placeholder_text = placeholder_text
+    # widget._widget._behavior.placeholder_text = placeholder_text
     widget.text = default_text
     return row, widget
 
@@ -29,14 +29,14 @@ def combo_box_template(ui, label, items, indent=False):
     row.add_spacing(5)
     widget = ui.create_combo_box_widget(items=items)
     row.add(widget)
-    #row.add_stretch()
+    # row.add_stretch()
     return row, widget
 
 
 def check_box_template(ui, label):
     row = ui.create_row_widget()
     widget = ui.create_check_box_widget(label)
-    #row.add_spacing(5)
+    # row.add_spacing(5)
     row.add(widget)
     return row, widget
 
@@ -84,3 +84,19 @@ class Section:
     @property
     def _section_content_column(self):
         return self.__section_content_column
+
+
+class StructureRecognitionModule:
+
+    def __init__(self, ui, document_controller):
+        self.ui = ui
+        self.document_controller = document_controller
+
+    def create_widgets(self, column):
+        raise NotImplementedError()
+
+    def set_preset(self, name):
+        raise NotImplementedError()
+
+    def fetch_parameters(self):
+        raise NotImplementedError()
