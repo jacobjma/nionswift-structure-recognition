@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from .unet import UNet
 
 presets = {'graphene': {'training_sampling': 0.05859375,
+                        'margin' : 2.,
                         'mask_model': {'in_channels': 1,
                                        'out_channels': 3,
                                        'init_features': 32,
@@ -366,6 +367,7 @@ class AtomRecognitionModel:
         self.training_sampling = training_sampling
         self.scale_model = scale_model
         self.discretization_model = discretization_model
+        self.last_density = None
 
     def standardize_dims(self, images):
         if len(images.shape) == 2:
@@ -407,12 +409,17 @@ class AtomRecognitionModel:
         images = self.rescale_images(images, sampling)
         images = self.normalize_images(images)
         images = pad_to_size(images, images.shape[2], images.shape[3], n=16)
-        mask = self.mask_model(images)
-        mask = torch.sum(mask[:, :-1], dim=1)[:, None]
+        classes = self.mask_model(images)
+        mask = torch.sum(classes[:, :-1], dim=1)[:, None]
         images = self.normalize_images(images, mask)
         density = self.density_model(images)
         density = mask * density
         density = density.detach().cpu().numpy()
+
+        #density = self.deep_learning_module.postprocess_images(density[0, 0], orig_shape, sampling)
+        #self.last_density = density
+        #self.
+
         points = self.discretization_model(density)
         points = self.postprocess_points(points, density.shape[-2:], orig_shape, sampling)
         #points = [self.postprocess_points(p, density.shape[-2:], orig_shape, sampling) for p in points]

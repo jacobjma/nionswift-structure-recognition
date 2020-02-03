@@ -1,24 +1,6 @@
-import os
-
-import numpy as np
-import torch
-import torch.nn.functional as F
-from scipy.ndimage import zoom
-
-from .unet import UNet
 from .utils import StructureRecognitionModule
 from .widgets import Section, line_edit_template
-
-presets = {'graphene':
-               {'mask_weights_file': 'graphene_mask.pt',
-                'density_weights_file': 'graphene_density.pt',
-                'training_sampling': '0.05859375',
-                'margin': '2',
-                'nms_distance': '1',
-                'nms_threshold': '0.5',
-                }
-           }
-
+from .model import build_model_from_dict, presets
 
 
 
@@ -54,74 +36,16 @@ class DeepLearningModule(StructureRecognitionModule):
 
     def set_preset(self, name):
         # self.model_line_edit.text = presets[name]['model_file']
-        self.mask_weights_line_edit.text = presets[name]['mask_weights_file']
-        self.density_weights_line_edit.text = presets[name]['density_weights_file']
+        self.mask_weights_line_edit.text = presets[name]['mask_model']['weights']
+        self.density_weights_line_edit.text = presets[name]['density_model']['weights']
         self.training_sampling_line_edit.text = presets[name]['training_sampling']
         self.margin_line_edit.text = presets[name]['margin']
-        self.nms_distance_line_edit.text = presets[name]['nms_distance']
-        self.nms_threshold_line_edit.text = presets[name]['nms_threshold']
-
-    def reshape_images(self, images):
-        if len(images.shape) == 2:
-            images = images.unsqueeze(0).unsqueeze(0)
-
-        elif len(images.shape) == 3:
-            images = torch.unsqueeze(images, 0)
-
-        elif len(images.shape) != 4:
-            raise RuntimeError('')
-
-        return images
-
-    def rescale_images(self, images, sampling):
-        scale_factor = sampling / self.training_sampling
-        images = F.interpolate(images, scale_factor=scale_factor, mode='nearest')
-        return images
-
-    def normalize_images(self, images, mask=None):
-        return weighted_normalization(images, mask)
-
-    def postprocess_images(self, image, original_shape, sampling):
-        image = zoom(image, self.training_sampling / sampling)
-        shape = image.shape
-        padding = (shape[0] - original_shape[0], shape[1] - original_shape[1])
-        image = image[padding[0] // 2: padding[0] // 2 + original_shape[0],
-                padding[1] // 2: padding[1] // 2 + original_shape[1]]
-        return image
-
-    def postprocess_points(self, points, shape, original_shape, sampling):
-        shape = np.round(np.array(shape) * self.training_sampling / sampling)
-        padding = (shape[0] - original_shape[0], shape[1] - original_shape[1])
-        points = points * self.training_sampling / sampling
-        return points - np.array([padding[0] // 2, padding[1] // 2])
-
-    def load_model(self):
-        models_dir = os.path.join(os.path.dirname(__file__), 'models')
-        density_weights = os.path.join(models_dir, self.density_weights_line_edit.text)
-        mask_weights = os.path.join(models_dir, self.mask_weights_line_edit.text)
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-        self.mask_model = UNet(in_channels=1, out_channels=3, init_features=32, dropout=0.)
-        self.mask_model.load_state_dict(torch.load(mask_weights, map_location=torch.device('cpu')))
-        self.mask_model.to(device)
-
-        self.density_model = UNet(in_channels=1, out_channels=1, init_features=32, dropout=0.)
-        self.density_model.load_state_dict(torch.load(density_weights, map_location=torch.device('cpu')))
-        self.density_model.to(device)
+        self.nms_distance_line_edit.text = presets[name]['nms']['distance']
+        self.nms_threshold_line_edit.text = presets[name]['nms']['threshold']
 
     def forward_pass(self, preprocessed_image):
         density, classes = self.model(preprocessed_image)
         return density, classes
-
-    def nms(self, density, classes=None):
-        nms_distance_pixels = int(np.round(self.nms_distance / self.training_sampling))
-
-        accepted = non_maximum_suppresion(density, distance=nms_distance_pixels,
-                                          threshold=self.nms_threshold, classes=classes)
-
-        points = np.array(np.where(accepted[0])).T
-        # probabilities = probabilities[0, :, points[:, 0], points[:, 1]]
-        return points  # , probabilities
 
     def fetch_parameters(self):
         self.training_sampling = float(self.training_sampling_line_edit.text)
@@ -129,7 +53,11 @@ class DeepLearningModule(StructureRecognitionModule):
         self.nms_distance = float(self.nms_distance_line_edit.text)
         self.nms_threshold = float(self.nms_threshold_line_edit.text)
 
-        self.load_model()
+        # parameters = presets
+
+        self.model = build_model_from_dict(presets['graphene'])
+
+        # self.load_model()
 
         # models_dir = os.path.join(os.path.dirname(__file__), 'models')
         #

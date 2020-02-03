@@ -214,7 +214,7 @@ class VisualizationModule(StructureRecognitionModule):
         #     self.faces_color = self.faces_color_combo_box.current_item.lower()
         #     self.faces_cmap = self.faces_cmap_combo_box.current_item
 
-    def create_background(self, image, classes, density):
+    def create_background(self, image):
 
         if self.background == 'image':
             visualization = ((image - image.min()) / image.ptp() * 255).astype(np.uint8)
