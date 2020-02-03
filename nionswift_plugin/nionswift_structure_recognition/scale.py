@@ -1,12 +1,7 @@
-import functools
-from bisect import bisect_left
-
-import numpy as np
-import torch
-
+from .model import presets
 from .utils import StructureRecognitionModule
 from .widgets import Section, line_edit_template, combo_box_template
-from .model import
+
 
 class ScaleDetectionModule(StructureRecognitionModule):
 
@@ -29,9 +24,9 @@ class ScaleDetectionModule(StructureRecognitionModule):
         section.column.add(min_sampling_row)
 
     def set_preset(self, name):
-        self.crystal_system_combo_box.current_item = presets[name]['crystal_system']
-        self.lattice_constant_line_edit.text = presets[name]['lattice_constant']
-        self.min_sampling_line_edit.text = presets[name]['min_sampling']
+        self.crystal_system_combo_box.current_item = presets[name]['scale']['crystal_system']
+        self.lattice_constant_line_edit.text = presets[name]['scale']['lattice_constant']
+        self.min_sampling_line_edit.text = presets[name]['scale']['min_sampling']
 
     def fetch_parameters(self):
         self.crystal_system = self.crystal_system_combo_box._widget.current_item.lower()

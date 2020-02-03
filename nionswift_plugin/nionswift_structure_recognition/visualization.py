@@ -45,7 +45,7 @@ def add_faces(points, faces, image, colors):
 def add_edges(points, edges, image, color, thickness=1):
     points = np.round(points).astype(int)
     for edge in edges:
-        cv2.line(image, tuple(points[edge[0]][::-1]), tuple(points[edge[1]][::-1]), color=color,
+        cv2.line(image, tuple(points[edge[0]]), tuple(points[edge[1]][::-1]), color=color,
                  thickness=thickness)
 
     return image
@@ -55,7 +55,7 @@ def add_points(points, image, size, colors):
     points = np.round(points).astype(np.int)
 
     for point, color in zip(points, colors):
-        cv2.circle(image, (point[1], point[0]), size, tuple(map(int, color)), -1)
+        cv2.circle(image, (point[0], point[1]), size, tuple(map(int, color)), -1)
 
     return image
 
@@ -83,7 +83,7 @@ class VisualizationModule(StructureRecognitionModule):
         column.add(section)
 
         background_row, self.background_combo_box = combo_box_template(self.ui, 'Background',
-                                                                       ['Image', 'Density', 'Classes', 'Solid'])
+                                                                       ['Image', 'Density', 'Segmentation', 'Solid'])
         section.column.add(background_row)
 
         points_row, self.points_check_box = check_box_template(self.ui, 'Overlay points')
@@ -214,7 +214,7 @@ class VisualizationModule(StructureRecognitionModule):
         #     self.faces_color = self.faces_color_combo_box.current_item.lower()
         #     self.faces_cmap = self.faces_cmap_combo_box.current_item
 
-    def create_background(self, image):
+    def create_background(self, image, density, segmentation):
 
         if self.background == 'image':
             visualization = ((image - image.min()) / image.ptp() * 255).astype(np.uint8)
@@ -224,8 +224,8 @@ class VisualizationModule(StructureRecognitionModule):
             visualization = (density * 255).astype(np.uint8)
             visualization = np.tile(visualization[..., None], (1, 1, 3))
 
-        elif self.background == 'classes':
-            visualization = (classes / classes.max() * 255).astype(np.uint8)
+        elif self.background == 'segmentation':
+            visualization = (segmentation / segmentation.max() * 255).astype(np.uint8)
             visualization = np.tile(visualization[..., None], (1, 1, 3))
 
         elif self.background == 'solid':
