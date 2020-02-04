@@ -349,7 +349,8 @@ def build_model_from_dict(parameters):
         accepted = non_maximum_suppresion(density, distance=nms_distance_pixels,
                                           threshold=parameters['nms']['threshold'])
 
-        points = np.array(np.where(accepted[0])).T
+        points = [np.array(np.where(accepted[i])).T for i in range(accepted.shape[0])]
+
         # probabilities = probabilities[0, :, points[:, 0], points[:, 1]]
         return points
 
@@ -376,7 +377,7 @@ class AtomRecognitionModel:
         if len(images.shape) == 2:
             images = images.unsqueeze(0).unsqueeze(0)
         elif len(images.shape) == 3:
-            images = torch.unsqueeze(images, 0)
+            images = torch.unsqueeze(images, 1)
         elif len(images.shape) != 4:
             raise RuntimeError('')
         return images
@@ -423,10 +424,15 @@ class AtomRecognitionModel:
         density = density.detach().cpu().numpy()
         segmentation = segmentation.detach().cpu().numpy()
 
-        self.last_density = self.postprocess_images(density[0, 0], orig_shape, sampling)
-        self.last_segmentation = self.postprocess_images(segmentation[0, 0], orig_shape, sampling)
+        self.last_density = self.postprocess_images(density, orig_shape, sampling)
+        self.last_segmentation = self.postprocess_images(segmentation, orig_shape, sampling)
 
         points = self.discretization_model(density)
-        points = self.postprocess_points(points, density.shape[-2:], orig_shape, sampling)
+        points = [self.postprocess_points(p, density.shape[-2:], orig_shape, sampling)[:, ::-1] for p in points]
         # points = [self.postprocess_points(p, density.shape[-2:], orig_shape, sampling) for p in points]
-        return points[:, ::-1]
+
+        if len(points) == 1:
+            return points[0]
+
+        else:
+            return points

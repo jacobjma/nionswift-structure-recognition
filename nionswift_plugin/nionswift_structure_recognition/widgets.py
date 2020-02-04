@@ -98,5 +98,5 @@ class StructureRecognitionModule:
     def set_preset(self, name):
         raise NotImplementedError()
 
-    def fetch_parameters(self):
+    def fetch_parameters(self, parameters):
         raise NotImplementedError()
