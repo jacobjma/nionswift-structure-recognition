@@ -6,6 +6,7 @@ import numpy as np
 from .model import presets, build_model_from_dict
 from .widgets import ScrollArea, push_button_template, combo_box_template, StructureRecognitionModule, \
     line_edit_template, Section, check_box_template
+from .visualization import create_visualization
 
 _ = gettext.gettext
 
@@ -35,7 +36,7 @@ class ScaleDetectionModule(StructureRecognitionModule):
         self.lattice_constant_line_edit.text = presets[name]['scale']['lattice_constant']
         self.min_sampling_line_edit.text = presets[name]['scale']['min_sampling']
 
-    def fetch_parameters(self, parameters):
+    def update_parameters(self, parameters):
         parameters['scale']['crystal_system'] = self.crystal_system_combo_box._widget.current_item.lower()
         parameters['scale']['lattice_constant'] = float(self.lattice_constant_line_edit._widget.text)
         parameters['scale']['min_sampling'] = float(self.min_sampling_line_edit._widget.text)
@@ -68,16 +69,18 @@ class DeepLearningModule(StructureRecognitionModule):
 
     def set_preset(self, name):
         # self.model_line_edit.text = presets[name]['model_file']
-        self.mask_weights_line_edit.text = presets[name]['mask_model']['weights']
-        self.density_weights_line_edit.text = presets[name]['density_model']['weights']
+        self.mask_weights_line_edit.text = presets[name]['mask_model']
+        self.density_weights_line_edit.text = presets[name]['density_model']
         self.training_sampling_line_edit.text = presets[name]['training_sampling']
         self.margin_line_edit.text = presets[name]['margin']
         self.nms_distance_line_edit.text = presets[name]['nms']['distance']
         self.nms_threshold_line_edit.text = presets[name]['nms']['threshold']
 
-    def fetch_parameters(self, parameters):
+    def update_parameters(self, parameters):
         parameters['training_sampling'] = float(self.training_sampling_line_edit.text)
         parameters['margin'] = float(self.margin_line_edit.text)
+        parameters['mask_model'] = self.mask_weights_line_edit.text
+        parameters['density_model'] = self.density_weights_line_edit.text
         parameters['nms']['distance'] = float(self.nms_distance_line_edit.text)
         parameters['nms']['threshold'] = float(self.nms_threshold_line_edit.text)
 
@@ -98,49 +101,18 @@ class VisualizationModule(StructureRecognitionModule):
         points_row, self.points_check_box = check_box_template(self.ui, 'Overlay points')
         section.column.add(points_row)
 
-        points_settings_column = self.ui.create_column_widget()
-        points_color_column = self.ui.create_column_widget()
+        self.points_settings_column = self.ui.create_column_widget()
+        self.points_color_column = self.ui.create_column_widget()
 
         self.points_size_line_edit = None
         self.points_color_combo_box = None
         self.point_color_solid_line_edit = None
 
-        section.column.add(points_settings_column)
-        section.column.add(points_color_column)
+        section.column.add(self.points_settings_column)
+        section.column.add(self.points_color_column)
         section.column.add_spacing(5)
 
-        def points_check_box_changed(checked):
-            points_settings_column._widget.remove_all()
-            points_color_column._widget.remove_all()
-
-            def point_color_combo_box_changed(item):
-                points_color_column._widget.remove_all()
-
-                if item.lower() == 'solid':
-                    points_color_solid_row, self.point_color_solid_line_edit = line_edit_template(self.ui, 'Color',
-                                                                                                  default_text='red')
-                    points_color_column.add(points_color_solid_row)
-
-            if checked:
-                points_size_row, self.points_size_line_edit = line_edit_template(self.ui, 'Point size', default_text=3)
-
-                points_color_row, self.points_color_combo_box = combo_box_template(self.ui, 'Point color',
-                                                                                   ['Solid', 'Class'])
-
-                self.points_color_combo_box.on_current_item_changed = point_color_combo_box_changed
-
-                points_settings_column.add_spacing(5)
-                points_settings_column.add(points_size_row)
-                points_settings_column.add(points_color_row)
-
-                point_color_combo_box_changed(self.points_color_combo_box.current_item)
-
-            else:
-                self.points_size_line_edit = None
-
-        self.points_check_box.on_checked_changed = points_check_box_changed
-        self.points_check_box.checked = True
-        points_check_box_changed(self.points_check_box.checked)
+        self.points_check_box.on_checked_changed = self.points_check_box_changed
 
         # graph_row, self.graph_check_box = check_box_template(self.ui, 'Overlay graph')
         # section.column.add(graph_row)
@@ -196,20 +168,51 @@ class VisualizationModule(StructureRecognitionModule):
         # self.faces_check_box.checked = False
         # faces_check_box_changed(self.faces_check_box.checked)
 
-    def set_preset(self, x):
-        pass
+    def points_check_box_changed(self, checked):
+        self.points_settings_column._widget.remove_all()
+        self.points_color_column._widget.remove_all()
 
-    def fetch_parameters(self, parameters):
-        self.background = self.background_combo_box._widget.current_item.lower()
-        self.overlay_points = self.points_check_box.checked
+        def point_color_combo_box_changed(item):
+            self.points_color_column._widget.remove_all()
 
-        if self.overlay_points:
-            self.points_size = int(self.points_size_line_edit.text)
+            if item.lower() == 'solid':
+                points_color_solid_row, self.point_color_solid_line_edit = line_edit_template(self.ui, 'Color',
+                                                                                              default_text='red')
+                self.points_color_column.add(points_color_solid_row)
 
-            self.points_color = self.points_color_combo_box.current_item.lower()
+        if checked:
+            points_size_row, self.points_size_line_edit = line_edit_template(self.ui, 'Point size', default_text=3)
 
-            if self.points_color == 'solid':
-                self.points_color_solid = self.point_color_solid_line_edit.text
+            points_color_row, self.points_color_combo_box = combo_box_template(self.ui, 'Point color',
+                                                                               ['Solid', 'Class'])
+
+            self.points_color_combo_box.on_current_item_changed = point_color_combo_box_changed
+
+            self.points_settings_column.add_spacing(5)
+            self.points_settings_column.add(points_size_row)
+            self.points_settings_column.add(points_color_row)
+
+            point_color_combo_box_changed(self.points_color_combo_box.current_item)
+
+        else:
+            self.points_size_line_edit = None
+
+    def set_preset(self, name):
+        self.points_check_box.checked = presets[name]['visualization']['points']['active']
+        self.points_check_box_changed(self.points_check_box.checked)
+        if self.points_check_box.checked:
+            self.points_size_line_edit.text = presets[name]['visualization']['points']['size']
+
+    def update_parameters(self, parameters):
+        parameters['visualization']['background'] = self.background_combo_box._widget.current_item.lower()
+        parameters['visualization']['points']['active'] = self.points_check_box.checked
+
+        if self.points_check_box.checked:
+            parameters['visualization']['points']['size'] = int(self.points_size_line_edit.text)
+            parameters['visualization']['points']['color_mode'] = self.points_color_combo_box.current_item.lower()
+
+            if parameters['visualization']['points']['color_mode'] == 'solid':
+                parameters['visualization']['points']['color'] = self.point_color_solid_line_edit.text
 
         # self.overlay_graph = self.graph_check_box.checked
         #
@@ -223,14 +226,15 @@ class VisualizationModule(StructureRecognitionModule):
         #     self.faces_cmap = self.faces_cmap_combo_box.current_item
 
 
-class StructureRecognitionPanelDelegate:
+from nion.swift import Panel
 
-    def __init__(self, api):
-        self.api = api
-        self.panel_id = "structure-recognition-panel"
-        self.panel_name = _("Structure Recognition")
-        self.panel_positions = ["left", "right"]
-        self.panel_position = "right"
+
+class StructureRecognitionPanel(Panel.Panel):
+
+    # def __init__(self, api):
+    def __init__(self, document_controller, panel_id, properties):
+        super().__init__(document_controller, panel_id, _("Structure Recognition"))
+
         self.output_data_item = None
         self.source_data_item = None
         self.stop_live_analysis_event = threading.Event()
@@ -238,9 +242,26 @@ class StructureRecognitionPanelDelegate:
         self.model = None
         self.parameters = presets['graphene']
 
-    def create_panel_widget(self, ui, document_controller):
-        self.ui = ui
-        self.document_controller = document_controller
+
+
+        document_model = document_controller.document_model
+        ui = document_controller.ui
+
+        main_column = ui.create_column_widget()
+        self.widget = main_column
+
+        # self.api = api
+        # self.panel_id = "structure-recognition-panel"
+        # self.panel_name = _("Structure Recognition")
+        # self.panel_positions = ["left", "right"]
+        # self.panel_position = "right"
+
+        # super().__init__(api._document_controller, panel_id, _("Structure"))
+
+    #def create_panel_widget(self, ui, document_controller):
+        #self.ui = ui
+        # self.document_controller = document_controller
+
         main_column = ui.create_column_widget()
         scroll_area = ScrollArea(ui._ui)
         scroll_area.content = main_column._widget
@@ -256,7 +277,7 @@ class StructureRecognitionPanelDelegate:
             # self.graph_module.set_preset(x.lower())
             self.visualization_module.set_preset(x.lower())
 
-        preset_row, self.preset_combo_box = combo_box_template(self.ui, 'Preset', ['None', 'Graphene'],
+        preset_row, self.preset_combo_box = combo_box_template(ui, 'Preset', ['None', 'Graphene'],
                                                                indent=True)
         self.preset_combo_box.on_current_item_changed = preset_combo_box_changed
         main_column.add(preset_row)
@@ -287,20 +308,29 @@ class StructureRecognitionPanelDelegate:
 
         self.preset_combo_box.current_item = 'Graphene'
         main_column.add_stretch()
-
-        return scroll_area
+        self.update_parameters()
+        #return scroll_area
 
     def process_sequence(self):
         window = self.api.application.document_windows[0]
         data_item = window.target_data_item
+        images = data_item.xdata.data[:2]
 
-        data = data_item.xdata.data[:2]
+        points = self.model.predict(images)
 
-        self.update_parameters()
+        visualization = create_visualization(images, None, None, points, self.parameters['visualization'])
 
-        points = self.model.predict(data)
+        descriptor = self.api.create_data_descriptor(is_sequence=data_item.xdata.is_sequence,
+                                                     collection_dimension_count=0,
+                                                     datum_dimension_count=2)
 
-        print(points)
+        # data = (np.random.rand(4, 64, 64, 3) * 255).astype(np.uint8)
+        xdata = self.api.create_data_and_metadata(visualization, data_descriptor=descriptor)
+        self.api.library.create_data_item_from_data_and_metadata(xdata)
+
+        # dummy_data = np.zeros((1, 1, 3), dtype=np.uint8)
+        # xdata = self.api.create_data_and_metadata(dummy_data, data_descriptor=descriptor)
+        # self.output_data_item = self.api.library.create_data_item_from_data_and_metadata(xdata)
 
         # if source_data_item.xdata.is_sequence:
         #    current_index = source_data_item._DataItem__display_item.display_data_channel.sequence_index
@@ -318,10 +348,10 @@ class StructureRecognitionPanelDelegate:
         # return self.api.get_hardware_source_by_id('usim_scan_device', '1.0')
 
     def update_parameters(self):
-        self.scale_detection_module.fetch_parameters(self.parameters)
-        self.deep_learning_module.fetch_parameters(self.parameters)
+        self.scale_detection_module.update_parameters(self.parameters)
+        self.deep_learning_module.update_parameters(self.parameters)
         # self.graph_module.fetch_parameters()
-        self.visualization_module.fetch_parameters()
+        self.visualization_module.update_parameters(self.parameters)
 
         self.model = build_model_from_dict(self.parameters)
 
@@ -350,7 +380,7 @@ class StructureRecognitionPanelDelegate:
 
         self.update_parameters()
 
-        model = self.deep_learning_module.model
+        model = self.model
 
         print('start processing')
         with self.api.library.data_ref_for_data_item(self.output_data_item) as data_ref:
@@ -367,11 +397,9 @@ class StructureRecognitionPanelDelegate:
 
                     # self.output_data_item.title = 'Analysis of ' + camera.get_property_as_str('name')
 
-                    visualization = self.visualization_module.create_background(orig_images,
-                                                                                model.last_density,
-                                                                                model.last_segmentation
-                                                                                )
-                    visualization = self.visualization_module.add_points(visualization, points)
+                    visualization = create_visualization(orig_images, model.last_density, model.last_segmentation,
+                                                         points, self.parameters['visualization'])
+                    # visualization = self.visualization_module.add_points(visualization, points)
 
                     data_ref.data = visualization
 
@@ -380,13 +408,19 @@ class StructureRecognitionPanelDelegate:
             self.thread.start()
 
 
-class StructureRecognitionExtension(object):
-    extension_id = "nion.swift.extension.structure_recognition"
+# class StructureRecognitionExtension(object):
+#     extension_id = "nion.swift.extension.structure_recognition"
+#
+#     def __init__(self, api_broker):
+#         api = api_broker.get_api(version='~1.0', ui_version='~1.0')
+#         self.__panel_ref = api.create_panel(StructureRecognitionPanelDelegate(api))
+#
+#     def close(self):
+#         self.__panel_ref.close()
+#         self.__panel_ref = None
 
-    def __init__(self, api_broker):
-        api = api_broker.get_api(version='~1.0', ui_version='~1.0')
-        self.__panel_ref = api.create_panel(StructureRecognitionPanelDelegate(api))
+from nion.swift import Workspace
 
-    def close(self):
-        self.__panel_ref.close()
-        self.__panel_ref = None
+workspace_manager = Workspace.WorkspaceManager()
+workspace_manager.register_panel(StructureRecognitionPanel, "structure-recognition-panel", _("Structure Recognition"),
+                                 ["left", "right"], "right")

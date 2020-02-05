@@ -9,27 +9,23 @@ import torch.nn.functional as F
 from scipy.ndimage import zoom
 
 from .unet import UNet
+import json
+import pathlib
+import os
 
-presets = {'graphene': {'training_sampling': 0.05859375,
-                        'margin': 2.,
-                        'mask_model': {'in_channels': 1,
-                                       'out_channels': 3,
-                                       'init_features': 32,
-                                       'weights': 'graphene_mask.pt',
-                                       'activation': nn.Softmax(1)},
-                        'density_model': {'in_channels': 1,
-                                          'out_channels': 1,
-                                          'init_features': 32,
-                                          'weights': 'graphene_density.pt',
-                                          'activation': nn.Sigmoid()},
-                        'scale': {'crystal_system': 'hexagonal',
-                                  'lattice_constant': 2.46,
-                                  'min_sampling': .015
-                                  },
-                        'nms': {'distance': 1.2,
-                                'threshold': 0.5}
 
-                        }}
+def load_presets():
+    presets_dir = os.path.join(pathlib.Path(__file__).parent.absolute(), 'presets')
+
+    presets = {}
+    for file in os.listdir(presets_dir):
+        with open(os.path.join(presets_dir, file)) as f:
+            new_preset = json.load(f)
+            presets[new_preset['name']] = new_preset
+    return presets
+
+
+presets = load_presets()
 
 
 def sub2ind(rows, cols, array_shape):
@@ -316,23 +312,35 @@ def find_hexagonal_sampling(image, a, min_sampling, bins_per_spot=16):
     return (r * a / float(N) * np.sqrt(3.) / 2.).item()
 
 
-def build_unet_model(parameters):
+def build_unet_model(weights_file):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-    model = UNet(in_channels=parameters['in_channels'],
-                 out_channels=parameters['out_channels'],
-                 init_features=parameters['init_features'],
+    weights_file = os.path.join(os.path.join(os.path.dirname(__file__), 'models'), weights_file)
+    weights = torch.load(weights_file, map_location=device)
+
+    weights_list = list(weights.values())
+
+    init_features = weights_list[0].shape[0]
+    in_channels = weights_list[0].shape[1]
+    out_channels = len(weights_list[-1])
+
+    model = UNet(in_channels=in_channels,
+                 out_channels=out_channels,
+                 init_features=init_features,
                  dropout=0.)
 
-    weights_file = os.path.join(os.path.join(os.path.dirname(__file__), 'models'), parameters['weights'])
-    model.load_state_dict(torch.load(weights_file, map_location=device))
+    model.load_state_dict(weights)
     model.to(device)
-    return lambda x: parameters['activation'](model(x))
+
+    if out_channels == 1:
+        return lambda x: nn.Sigmoid()(model(x))
+    else:
+        return lambda x: nn.Softmax(1)(model(x))
 
 
 def build_model_from_dict(parameters):
-    mask_model = build_unet_model(parameters=parameters['mask_model'])
-    density_model = build_unet_model(parameters=parameters['density_model'])
+    mask_model = build_unet_model(parameters['mask_model'])
+    density_model = build_unet_model(parameters['density_model'])
 
     if parameters['scale']['crystal_system'] == 'hexagonal':
         scale_model = lambda x: find_hexagonal_sampling(x, a=parameters['scale']['lattice_constant'],
@@ -406,6 +414,7 @@ class AtomRecognitionModel:
         return points - np.array([padding[0] // 2, padding[1] // 2])
 
     def predict(self, images):
+        print(images.shape)
         images = torch.tensor(images).to(self.device)
         images = self.standardize_dims(images)
         orig_shape = images.shape[-2:]
@@ -414,7 +423,6 @@ class AtomRecognitionModel:
         images = self.normalize_images(images)
         images = pad_to_size(images, images.shape[2], images.shape[3], n=16)
         segmentation = self.mask_model(images)
-
         mask = torch.sum(segmentation[:, :-1], dim=1)[:, None]
 
         images = self.normalize_images(images, mask)
@@ -424,15 +432,11 @@ class AtomRecognitionModel:
         density = density.detach().cpu().numpy()
         segmentation = segmentation.detach().cpu().numpy()
 
-        self.last_density = self.postprocess_images(density, orig_shape, sampling)
-        self.last_segmentation = self.postprocess_images(segmentation, orig_shape, sampling)
+        #self.last_density = self.postprocess_images(density, orig_shape, sampling)
+        #self.last_segmentation = self.postprocess_images(segmentation, orig_shape, sampling)
 
         points = self.discretization_model(density)
         points = [self.postprocess_points(p, density.shape[-2:], orig_shape, sampling)[:, ::-1] for p in points]
         # points = [self.postprocess_points(p, density.shape[-2:], orig_shape, sampling) for p in points]
 
-        if len(points) == 1:
-            return points[0]
-
-        else:
-            return points
+        return points
