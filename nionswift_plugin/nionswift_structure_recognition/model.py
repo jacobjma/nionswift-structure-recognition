@@ -368,6 +368,37 @@ def build_model_from_dict(parameters):
     return model
 
 
+class BatchGenerator:
+
+    def __init__(self, n_items, max_batch_size):
+        self._n_items = n_items
+        self._n_batches = (n_items + (-n_items % max_batch_size)) // max_batch_size
+        self._batch_size = (n_items + (-n_items % self.n_batches)) // self.n_batches
+
+    @property
+    def n_batches(self):
+        return self._n_batches
+
+    @property
+    def batch_size(self):
+        return self._batch_size
+
+    @property
+    def n_items(self):
+        return self._n_items
+
+    def generate(self):
+        batch_start = 0
+        for i in range(self.n_batches):
+            batch_end = batch_start + self.batch_size
+            if i == self.n_batches - 1:
+                yield batch_start, self.n_items - batch_end + self.batch_size
+            else:
+                yield batch_start, self.batch_size
+
+            batch_start = batch_end
+
+
 class AtomRecognitionModel:
 
     def __init__(self, mask_model, density_model, training_sampling, scale_model, discretization_model):
@@ -413,8 +444,17 @@ class AtomRecognitionModel:
         points = points * self.training_sampling / sampling
         return points - np.array([padding[0] // 2, padding[1] // 2])
 
+    def predict_batches(self, images, max_batch=4):
+        batch_generator = BatchGenerator(len(images), max_batch)
+
+        points = []
+        for i, (start, size) in enumerate(batch_generator.generate()):
+            print('Mini batch: {} of {}'.format(i, batch_generator.n_batches))
+            points += self.predict(images[start:start + size])
+
+        return points
+
     def predict(self, images):
-        print(images.shape)
         images = torch.tensor(images).to(self.device)
         images = self.standardize_dims(images)
         orig_shape = images.shape[-2:]
@@ -430,10 +470,6 @@ class AtomRecognitionModel:
         density = self.density_model(images)
         density = mask * density
         density = density.detach().cpu().numpy()
-        segmentation = segmentation.detach().cpu().numpy()
-
-        #self.last_density = self.postprocess_images(density, orig_shape, sampling)
-        #self.last_segmentation = self.postprocess_images(segmentation, orig_shape, sampling)
 
         points = self.discretization_model(density)
         points = [self.postprocess_points(p, density.shape[-2:], orig_shape, sampling)[:, ::-1] for p in points]

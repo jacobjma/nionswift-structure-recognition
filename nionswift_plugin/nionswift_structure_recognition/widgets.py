@@ -67,15 +67,10 @@ class ScrollArea:
 class Section:
 
     def __init__(self, ui, title):
-        self.__ui = ui
-        self.__section_content_column = self.__ui._ui.create_column_widget()
-        self.__section_widget = Widgets.SectionWidget(self.__ui._ui, title, self.__section_content_column, 'test')
+        self.__section_content_column = ui.create_column_widget()
+        self.__section_widget = Widgets.SectionWidget(ui, title, self.__section_content_column, 'test')
         self.column = ui.create_column_widget()
-        self.__section_content_column.add(self.column._widget)
-
-    @property
-    def _ui(self):
-        return self.__ui
+        self.__section_content_column.add(self.column)
 
     @property
     def _widget(self):
@@ -86,7 +81,7 @@ class Section:
         return self.__section_content_column
 
 
-class StructureRecognitionModule:
+class StructureRecognitionSection:
 
     def __init__(self, ui, document_controller):
         self.ui = ui
