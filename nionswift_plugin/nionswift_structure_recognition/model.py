@@ -339,8 +339,8 @@ def build_unet_model(weights_file):
 
 
 def build_model_from_dict(parameters):
-    mask_model = build_unet_model(parameters['mask_model'])
-    density_model = build_unet_model(parameters['density_model'])
+    mask_model = build_unet_model(parameters['deep_learning']['mask_model'])
+    density_model = build_unet_model(parameters['deep_learning']['density_model'])
 
     if parameters['scale']['crystal_system'] == 'hexagonal':
         scale_model = lambda x: find_hexagonal_sampling(x, a=parameters['scale']['lattice_constant'],
@@ -352,7 +352,8 @@ def build_model_from_dict(parameters):
         pass
 
     def discretization_model(density):
-        nms_distance_pixels = int(np.round(parameters['nms']['distance'] / parameters['training_sampling']))
+        nms_distance_pixels = int(
+            np.round(parameters['nms']['distance'] / parameters['deep_learning']['training_sampling']))
 
         accepted = non_maximum_suppresion(density, distance=nms_distance_pixels,
                                           threshold=parameters['nms']['threshold'])
@@ -362,7 +363,8 @@ def build_model_from_dict(parameters):
         # probabilities = probabilities[0, :, points[:, 0], points[:, 1]]
         return points
 
-    model = AtomRecognitionModel(mask_model, density_model, training_sampling=parameters['training_sampling'],
+    model = AtomRecognitionModel(mask_model, density_model,
+                                 training_sampling=parameters['deep_learning']['training_sampling'],
                                  scale_model=scale_model, discretization_model=discretization_model)
 
     return model

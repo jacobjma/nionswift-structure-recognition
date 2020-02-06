@@ -12,7 +12,7 @@ from nion.swift.Facade import Library, DataItem, Display
 from nion.ui import Widgets
 
 from .model import presets, build_model_from_dict
-from .visualization import create_visualization
+from .visualization import create_visualization, add_points
 
 _ = gettext.gettext
 
@@ -112,10 +112,13 @@ class SequencesSection(Section):
         super().__init__(ui, 'sequences', 'Sequences')
 
         analyse_sequence_row, self.analyse_sequence_push_button = push_button_template(ui, 'Analyse sequence')
+        visualize_row, self.visualize_push_button = push_button_template(ui, 'Visualize')
+        export_row, self.export_push_button = push_button_template(ui, 'Export')
 
-        self.analyse_sequence_push_button.on_clicked = self.process_sequence
-        self.add_widget_to_content(mask_weights_row)
-
+        # self.analyse_sequence_push_button.on_clicked = self.process_sequence
+        self.add_widget_to_content(analyse_sequence_row)
+        self.add_widget_to_content(visualize_row)
+        self.add_widget_to_content(export_row)
 
     def set_preset(self, name):
         pass
@@ -166,18 +169,18 @@ class DeepLearningSection(Section):
         self.add_widget_to_content(nms_threshold_row)
 
     def set_preset(self, name):
-        self.mask_weights_line_edit.text = presets[name]['mask_model']
-        self.density_weights_line_edit.text = presets[name]['density_model']
-        self.training_sampling_line_edit.text = presets[name]['training_sampling']
-        self.margin_line_edit.text = presets[name]['margin']
+        self.mask_weights_line_edit.text = presets[name]['deep_learning']['mask_model']
+        self.density_weights_line_edit.text = presets[name]['deep_learning']['density_model']
+        self.training_sampling_line_edit.text = presets[name]['deep_learning']['training_sampling']
+        self.margin_line_edit.text = presets[name]['deep_learning']['margin']
         self.nms_distance_line_edit.text = presets[name]['nms']['distance']
         self.nms_threshold_line_edit.text = presets[name]['nms']['threshold']
 
     def update_parameters(self, parameters):
-        parameters['training_sampling'] = float(self.training_sampling_line_edit.text)
-        parameters['margin'] = float(self.margin_line_edit.text)
-        parameters['mask_model'] = self.mask_weights_line_edit.text
-        parameters['density_model'] = self.density_weights_line_edit.text
+        parameters['deep_learning']['training_sampling'] = float(self.training_sampling_line_edit.text)
+        parameters['deep_learning']['margin'] = float(self.margin_line_edit.text)
+        parameters['deep_learning']['mask_model'] = self.mask_weights_line_edit.text
+        parameters['deep_learning']['density_model'] = self.density_weights_line_edit.text
         parameters['nms']['distance'] = float(self.nms_distance_line_edit.text)
         parameters['nms']['threshold'] = float(self.nms_threshold_line_edit.text)
 
@@ -337,21 +340,7 @@ class StructureRecognitionPanel(Panel.Panel):
         scroll_area = ui.create_scroll_area_widget()
         scroll_area.content = main_column
 
-        self.sequences_section = SequencesSection(ui)
-        self.scale_detection_section = ScaleDetectionSection(ui)
-        self.deep_learning_section = DeepLearningSection(ui)
-        self.visualization_section = VisualizationSection(ui)
-
-        def preset_combo_box_changed(x):
-            self.scale_detection_section.set_preset(x.lower())
-            self.deep_learning_section.set_preset(x.lower())
-            # self.graph_module.set_preset(x.lower())
-            self.visualization_section.set_preset(x.lower())
-
         preset_row, self.preset_combo_box = combo_box_template(ui, 'Preset', ['None', 'Graphene'], indent=True)
-        self.preset_combo_box.on_current_item_changed = preset_combo_box_changed
-        main_column.add(preset_row)
-
         run_row, self.run_push_button = push_button_template(ui, 'Start live analysis')
 
         def start_live_analysis():
@@ -364,32 +353,63 @@ class StructureRecognitionPanel(Panel.Panel):
 
         self.run_push_button.on_clicked = start_live_analysis
 
+        self.sequences_section = SequencesSection(ui)
+
+        self.sequences_section.analyse_sequence_push_button.on_clicked = self.process_sequence
+        self.sequences_section.visualize_push_button.on_clicked = self.create_display_computation
+        self.sequences_section.export_push_button.on_clicked = self.export_metadata
+
+        self.scale_detection_section = ScaleDetectionSection(ui)
+        self.deep_learning_section = DeepLearningSection(ui)
+        self.visualization_section = VisualizationSection(ui)
+
+        def preset_combo_box_changed(x):
+            self.scale_detection_section.set_preset(x.lower())
+            self.deep_learning_section.set_preset(x.lower())
+            # self.graph_module.set_preset(x.lower())
+            self.visualization_section.set_preset(x.lower())
+
+        self.preset_combo_box.on_current_item_changed = preset_combo_box_changed
+
+        main_column.add(preset_row)
         main_column.add(run_row)
         main_column.add(self.scale_detection_section)
         main_column.add(self.deep_learning_section)
         main_column.add(self.visualization_section)
+        main_column.add(self.sequences_section)
         self.widget = scroll_area
         main_column.add_stretch()
 
         preset_combo_box_changed('graphene')
         self.update_parameters()
 
+        #import cv2
+
+
+
         # def test(x):
         #    print(x)
-        # document_controller.selected_display_panel
-        # DisplayPanelManager
 
+        # DisplayPanelManager
 
         # self.__cursor_changed_event_listener = self.document_controller.cursor_changed_event.listen(test)
 
-    def create_display_computation(self, data_item):
-        computation = self.document_model.create_computation()
+    def export_metadata(self):
+        print(self.document_controller.selected_display_panel)
+        # self.x.value = 5
+
+    def create_display_computation(self):
+        data_item = self.document_controller.selected_data_item
+
+        computation = self.document_model.create_computation(a='ssss')
 
         display_data_channel = self.document_model.get_display_item_for_data_item(data_item).display_data_channel
         specifier_dict = {"version": 1, "type": "data_source", "uuid": str(display_data_channel.uuid)}
         computation.create_object('input_data_item', specifier_dict)
+        # self.x = computation.create_variable(name='x', value_type='integral', value=70)
 
-        output_data_item = self.library.create_data_item_from_data(np.zeros_like(data_item.xdata.data[-2:]))
+        output_data_item = self.library.create_data_item_from_data(
+            np.zeros(data_item.xdata.data.shape[-2:] + (3,), dtype=np.uint8))
 
         computation.create_result('output_data_item', output_data_item.specifier.rpc_dict)
         computation.processing_id = 'structure-recognition.visualize'
@@ -403,8 +423,9 @@ class StructureRecognitionPanel(Panel.Panel):
         points = self.model.predict_batches(images)
 
         metadata = data_item.metadata
-        metadata['struture-recognition'] = {}
-        metadata['struture-recognition']['frames'] = {'{}'.format(i): p.tolist() for i, p in enumerate(points)}
+        metadata['structure-recognition'] = {}
+        metadata['structure-recognition']['frames'] = {'{}'.format(i): p.tolist() for i, p in enumerate(points)}
+        data_item.metadata = metadata
 
         # visualization = create_visualization(images, None, None, points, self.parameters['visualization'])
 
@@ -494,11 +515,19 @@ class VisualizeStructureRecognition:
 
     def __init__(self, computation, **kwargs):
         self.computation = computation
+        print(computation, kwargs)
 
     def execute(self, input_data_item):
-        print('sssssss')
         sequence_index = input_data_item.data_item._DataItem__display_item.display_data_channel.sequence_index
-        self.data = input_data_item.data_item.display_xdata.data
+        image = input_data_item.data_item.display_xdata.data
+
+        points = input_data_item.data_item.metadata['structure-recognition']['frames'][str(sequence_index)]
+
+        image = ((image - np.min(image, axis=(-2, -1), keepdims=True)) /
+                 np.ptp(image, axis=(-2, -1), keepdims=True) * 255).astype(np.uint8)
+        image = np.tile(image[..., None], (len(image.shape) * (1,)) + (3,))
+
+        self.image = add_points(points, image, 3, (255, 0, 0))
 
         # descriptor = DataAndMetadata.DataDescriptor(is_sequence=False,
         #                                             collection_dimension_count=0,
@@ -507,7 +536,7 @@ class VisualizeStructureRecognition:
         # self.xdata = DataAndMetadata.new_data_and_metadata(data, data_descriptor=descriptor)
 
     def commit(self):
-        self.computation.set_referenced_data('output_data_item', self.data)
+        self.computation.set_referenced_data('output_data_item', self.image)
 
 
 workspace_manager = Workspace.WorkspaceManager()
