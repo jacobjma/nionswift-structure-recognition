@@ -10,9 +10,12 @@ from nion.swift.model import DataItem as DataItemModule
 from nion.swift.model import Symbolic
 from nion.swift.Facade import Library, DataItem, Display
 from nion.ui import Widgets
-
+from pynput.mouse import Listener
 from .model import presets, build_model_from_dict
 from .visualization import create_visualization, add_points
+import cv2
+from scipy.spatial import KDTree
+
 
 _ = gettext.gettext
 
@@ -119,6 +122,23 @@ class SequencesSection(Section):
         self.add_widget_to_content(analyse_sequence_row)
         self.add_widget_to_content(visualize_row)
         self.add_widget_to_content(export_row)
+
+    def set_preset(self, name):
+        pass
+
+    def update_parameters(self, parameters):
+        pass
+
+
+class EditSection(Section):
+
+    def __init__(self, ui):
+        super().__init__(ui, 'sequences', 'Sequences')
+
+        start_editing_row, self.start_editing_push_button = push_button_template(ui, 'Start Editing')
+
+        # self.analyse_sequence_push_button.on_clicked = self.process_sequence
+        self.add_widget_to_content(start_editing_row)
 
     def set_preset(self, name):
         pass
@@ -325,10 +345,19 @@ class StructureRecognitionPanel(Panel.Panel):
     def __init__(self, document_controller, panel_id, properties):
         super().__init__(document_controller, panel_id, _("Structure Recognition"))
 
+        self.mouse_thread = None
+        self.live_thread = None
+        self.process_thread = None
+        self.mouse_position = None
+
+        self.stop_mouse_event = threading.Event()
+
+        self.stop_live_event = threading.Event()
+        self.stop_live_event.set()
+
         self.output_data_item = None
         self.source_data_item = None
-        self.stop_live_analysis_event = threading.Event()
-        self.stop_live_analysis_event.set()
+
         self.model = None
         self.parameters = presets['graphene']
 
@@ -353,15 +382,19 @@ class StructureRecognitionPanel(Panel.Panel):
 
         self.run_push_button.on_clicked = start_live_analysis
 
+        self.scale_detection_section = ScaleDetectionSection(ui)
+        self.deep_learning_section = DeepLearningSection(ui)
+        self.visualization_section = VisualizationSection(ui)
+
         self.sequences_section = SequencesSection(ui)
 
         self.sequences_section.analyse_sequence_push_button.on_clicked = self.process_sequence
         self.sequences_section.visualize_push_button.on_clicked = self.create_display_computation
         self.sequences_section.export_push_button.on_clicked = self.export_metadata
 
-        self.scale_detection_section = ScaleDetectionSection(ui)
-        self.deep_learning_section = DeepLearningSection(ui)
-        self.visualization_section = VisualizationSection(ui)
+        self.edit_section = EditSection(ui)
+
+        self.edit_section.start_editing_push_button.on_clicked = self.start_editing
 
         def preset_combo_box_changed(x):
             self.scale_detection_section.set_preset(x.lower())
@@ -377,31 +410,55 @@ class StructureRecognitionPanel(Panel.Panel):
         main_column.add(self.deep_learning_section)
         main_column.add(self.visualization_section)
         main_column.add(self.sequences_section)
+        main_column.add(self.edit_section)
         self.widget = scroll_area
         main_column.add_stretch()
 
         preset_combo_box_changed('graphene')
         self.update_parameters()
 
-        #import cv2
+        # import cv2
+
+    def start_editing(self):
+        def test(x):
+            self.mouse_position = x
+
+        self.cursor_changed_event_listener = self.document_controller.cursor_changed_event.listen(test)
+
+        data_item = self.document_controller.selected_data_item
+
+        print(data_item)
+
+        #tree = KDTree()
+
+        def on_click(x, y, button, pressed):
+            pass
 
 
+        def listen_to_mouse():
+            with Listener(on_click=on_click) as listener:
+                listener.join()
 
-        # def test(x):
-        #    print(x)
+        self.mouse_thread = threading.Thread(target=listen_to_mouse, args=())
+        self.mouse_thread.start()
 
-        # DisplayPanelManager
-
-        # self.__cursor_changed_event_listener = self.document_controller.cursor_changed_event.listen(test)
+    def stop_editing(self):
+        self.stop_live_event.set()
+        self.cursor_changed_event_listener = None  # TODO : Actually terminate the thread
 
     def export_metadata(self):
-        print(self.document_controller.selected_display_panel)
+        pass
+
+        # with Listener(on_click=on_click) as listener:
+        #    listener.join()
+
+        # print(self.document_controller.selected_display_panel)
         # self.x.value = 5
 
     def create_display_computation(self):
         data_item = self.document_controller.selected_data_item
 
-        computation = self.document_model.create_computation(a='ssss')
+        computation = self.document_model.create_computation()
 
         display_data_channel = self.document_model.get_display_item_for_data_item(data_item).display_data_channel
         specifier_dict = {"version": 1, "type": "data_source", "uuid": str(display_data_channel.uuid)}
@@ -424,7 +481,16 @@ class StructureRecognitionPanel(Panel.Panel):
 
         metadata = data_item.metadata
         metadata['structure-recognition'] = {}
-        metadata['structure-recognition']['frames'] = {'{}'.format(i): p.tolist() for i, p in enumerate(points)}
+        metadata['structure-recognition']['frames'] = {}
+
+        for i in range(len(points)):
+            metadata['structure-recognition']['frames'][i] = {}
+            for j, point in enumerate(points[i].tolist()):
+                metadata['structure-recognition']['frames'][i][j] = {}
+                metadata['structure-recognition']['frames'][i][j]['position'] = point
+                metadata['structure-recognition']['frames'][i][j]['label'] = 0
+                metadata['structure-recognition']['frames'][i][j]['selected'] = False
+
         data_item.metadata = metadata
 
         # visualization = create_visualization(images, None, None, points, self.parameters['visualization'])
@@ -515,7 +581,6 @@ class VisualizeStructureRecognition:
 
     def __init__(self, computation, **kwargs):
         self.computation = computation
-        print(computation, kwargs)
 
     def execute(self, input_data_item):
         sequence_index = input_data_item.data_item._DataItem__display_item.display_data_channel.sequence_index
@@ -525,9 +590,16 @@ class VisualizeStructureRecognition:
 
         image = ((image - np.min(image, axis=(-2, -1), keepdims=True)) /
                  np.ptp(image, axis=(-2, -1), keepdims=True) * 255).astype(np.uint8)
-        image = np.tile(image[..., None], (len(image.shape) * (1,)) + (3,))
+        self.image = np.tile(image[..., None], (len(image.shape) * (1,)) + (3,))
 
-        self.image = add_points(points, image, 3, (255, 0, 0))
+        for point in points.values():
+            position = np.round(point['position']).astype(np.int)
+            cv2.circle(self.image, (position[0], position[1]), 3, (0, 0, 255), -1)
+
+
+
+
+        # self.image = add_points(points, image, 3, (0, 0, 255))
 
         # descriptor = DataAndMetadata.DataDescriptor(is_sequence=False,
         #                                             collection_dimension_count=0,
