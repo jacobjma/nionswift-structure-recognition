@@ -2,20 +2,19 @@ import gettext
 import threading
 import typing
 
+import cv2
 import numpy as np
-from nion.data import DataAndMetadata
 from nion.swift import Panel
 from nion.swift import Workspace
-from nion.swift.model import DataItem as DataItemModule
+from nion.swift.Facade import Library
 from nion.swift.model import Symbolic
-from nion.swift.Facade import Library, DataItem, Display
 from nion.ui import Widgets
+from nion.utils import Geometry
 from pynput.mouse import Listener
-from .model import presets, build_model_from_dict
-from .visualization import create_visualization, add_points
-import cv2
 from scipy.spatial import KDTree
 
+from .model import presets, build_model_from_dict
+from .visualization import float_images_to_rgb
 
 _ = gettext.gettext
 
@@ -114,14 +113,24 @@ class SequencesSection(Section):
     def __init__(self, ui):
         super().__init__(ui, 'sequences', 'Sequences')
 
-        analyse_sequence_row, self.analyse_sequence_push_button = push_button_template(ui, 'Analyse sequence')
-        visualize_row, self.visualize_push_button = push_button_template(ui, 'Visualize')
-        export_row, self.export_push_button = push_button_template(ui, 'Export')
+        indices_row, self.indices_line_edit = line_edit_template(ui, 'Sequence indices', placeholder_text='all')
+        analyse_row, self.analyse_push_button = push_button_template(ui, 'Analyse sequence')
+
+        new_visualization_row, self.new_visualization_push_button = push_button_template(ui, 'New visualization')
+        # export_row, self.export_push_button = push_button_template(ui, 'Export')
+
+        previous_row, self.previous_push_button = push_button_template(ui, 'Previous')
+        next_row, self.next_push_button = push_button_template(ui, 'Next')
+        row = ui.create_row_widget()
+        row.add(previous_row)
+        row.add(next_row)
 
         # self.analyse_sequence_push_button.on_clicked = self.process_sequence
-        self.add_widget_to_content(analyse_sequence_row)
-        self.add_widget_to_content(visualize_row)
-        self.add_widget_to_content(export_row)
+        self.add_widget_to_content(indices_row)
+        self.add_widget_to_content(analyse_row)
+        self.add_widget_to_content(new_visualization_row)
+        self.add_widget_to_content(row)
+        # self.add_widget_to_content(export_row)
 
     def set_preset(self, name):
         pass
@@ -133,9 +142,9 @@ class SequencesSection(Section):
 class EditSection(Section):
 
     def __init__(self, ui):
-        super().__init__(ui, 'sequences', 'Sequences')
+        super().__init__(ui, 'edit', 'Edit')
 
-        start_editing_row, self.start_editing_push_button = push_button_template(ui, 'Start Editing')
+        start_editing_row, self.start_editing_push_button = push_button_template(ui, 'Start editing')
 
         # self.analyse_sequence_push_button.on_clicked = self.process_sequence
         self.add_widget_to_content(start_editing_row)
@@ -355,8 +364,8 @@ class StructureRecognitionPanel(Panel.Panel):
         self.stop_live_event = threading.Event()
         self.stop_live_event.set()
 
-        self.output_data_item = None
-        self.source_data_item = None
+        self.visualization_data_items = {}
+        self.visualized_data_items = {}
 
         self.model = None
         self.parameters = presets['graphene']
@@ -388,9 +397,13 @@ class StructureRecognitionPanel(Panel.Panel):
 
         self.sequences_section = SequencesSection(ui)
 
-        self.sequences_section.analyse_sequence_push_button.on_clicked = self.process_sequence
-        self.sequences_section.visualize_push_button.on_clicked = self.create_display_computation
-        self.sequences_section.export_push_button.on_clicked = self.export_metadata
+        self.sequences_section.analyse_push_button.on_clicked = self.process_sequence
+        self.sequences_section.new_visualization_push_button.on_clicked = self.new_visualization
+
+        self.sequences_section.next_push_button.on_clicked = self.next_frame
+        self.sequences_section.previous_push_button.on_clicked = self.previous_frame
+
+        # self.sequences_section.export_push_button.on_clicked = self.export_metadata
 
         self.edit_section = EditSection(ui)
 
@@ -419,28 +432,120 @@ class StructureRecognitionPanel(Panel.Panel):
 
         # import cv2
 
-    def start_editing(self):
-        def test(x):
-            self.mouse_position = x
-
-        self.cursor_changed_event_listener = self.document_controller.cursor_changed_event.listen(test)
-
+    def new_visualization(self):
         data_item = self.document_controller.selected_data_item
+        new_visualization_data_item = self.library.create_data_item_from_data(
+            np.zeros(data_item.data.shape[-2:] + (3,), dtype=np.uint8))
+        self.visualization_data_items[data_item] = new_visualization_data_item
+        self.visualized_data_items[new_visualization_data_item._data_item] = data_item
 
-        print(data_item)
+    def get_selected_data_item(self):
+        try:
+            return self.visualized_data_items[self.document_controller.selected_data_item]
+        except KeyError:
+            return self.document_controller.selected_data_item
 
-        #tree = KDTree()
+    def get_visualizing_data_item(self, data_item):
+        try:
+            return self.visualization_data_items[data_item]
+        except KeyError:
+            return data_item
 
-        def on_click(x, y, button, pressed):
-            pass
+    def get_sequence_index(self, data_item):
+        return self.document_model.get_display_item_for_data_item(data_item).display_data_channel.sequence_index
 
+    def next_frame(self):
+        data_item = self.get_selected_data_item()
+        display_data_channel = self.document_model.get_display_item_for_data_item(data_item).display_data_channel
+        display_data_channel.sequence_index += 1
+        self.update_visualization()
 
-        def listen_to_mouse():
-            with Listener(on_click=on_click) as listener:
-                listener.join()
+    def previous_frame(self):
+        data_item = self.get_selected_data_item()
+        display_data_channel = self.document_model.get_display_item_for_data_item(data_item).display_data_channel
+        display_data_channel.sequence_index -= 1
+        self.update_visualization()
 
-        self.mouse_thread = threading.Thread(target=listen_to_mouse, args=())
-        self.mouse_thread.start()
+    def update_visualization(self, selected=None):
+        data_item = self.get_selected_data_item()
+        visualizing_data_item = self.get_visualizing_data_item(data_item)
+        sequence_index = self.get_sequence_index(data_item)
+        image = float_images_to_rgb(data_item.data[sequence_index])
+
+        # if points is None:
+        points = data_item.metadata['structure-recognition']['frames'][str(sequence_index)]
+
+        for point in points.values():
+            position = np.round(point['position']).astype(np.int)
+            if point['selected']:
+                cv2.circle(image, (position[0], position[1]), 3, (255, 0, 0), -1)
+            else:
+                cv2.circle(image, (position[0], position[1]), 3, (0, 0, 255), -1)
+
+        with self.library.data_ref_for_data_item(visualizing_data_item) as data_ref:
+            data_ref.data = image
+
+    def _overload_on_mouse_clicked(self, func):
+        original_mouse_clicked = self.document_controller.selected_display_panel.canvas_widget.on_mouse_clicked
+
+        def on_mouse_clicked(x, y, modifiers):
+            original_mouse_clicked(x, y, modifiers)
+            display_panel = self.document_controller.selected_display_panel
+            canvas_item = display_panel.root_container._RootCanvasItem__mouse_tracking_canvas_item
+            if canvas_item:
+                canvas_item_point = display_panel.root_container.map_to_canvas_item(Geometry.IntPoint(y=y, x=x),
+                                                                                    canvas_item)
+                if hasattr(canvas_item, 'map_widget_to_image'):
+                    image_point = canvas_item.map_widget_to_image(canvas_item_point)
+                    func(image_point)
+
+        self.document_controller.selected_display_panel.canvas_widget.on_mouse_clicked = on_mouse_clicked
+
+    def start_editing(self):
+        edited_data_item = self.get_selected_data_item()
+        edited_sequence_index = self.get_sequence_index(edited_data_item)
+
+        metadata = edited_data_item.metadata
+        points = metadata['structure-recognition']['frames'][str(edited_sequence_index)]
+
+        points_array = np.zeros((len(points), 2))
+        for i, point in points.items():
+            points_array[int(i)] = point['position']
+        tree = KDTree(points_array)
+
+        def func(x):
+            current_data_item = self.get_selected_data_item()
+
+            if (current_data_item is edited_data_item) & \
+                    (self.get_sequence_index(current_data_item) == edited_sequence_index):
+                _, idx = tree.query(x, 1)
+                metadata['structure-recognition']['frames'][str(edited_sequence_index)][points[str(i)]][
+                    'selected'] = True
+                edited_data_item.metadata = metadata
+
+                print(edited_data_item.metadata)
+
+        self._overload_on_mouse_clicked(func)
+
+        # def test(x):
+        #     self.mouse_position = x
+        #
+        # self.cursor_changed_event_listener = self.document_controller.cursor_changed_event.listen(test)
+        #
+        # data_item = self.document_controller.selected_data_item
+        #
+        # def on_click(x, y, button, pressed):
+        #     position = self.mouse_position[0]
+        #     if position:
+        #         split = self.mouse_position[0].split(',')
+        #         position = [float(split[0].split(':')[1][1:]), float(split[1][1:])]
+        #     distances, i = tree.query(position, 1)
+        #     points[str(i)]['selected'] = True
+        #     self.update_visualization(points)
+        #
+        #
+        # self.mouse_thread = threading.Thread(target=listen_to_mouse, args=())
+        # self.mouse_thread.start()
 
     def stop_editing(self):
         self.stop_live_event.set()
@@ -458,20 +563,20 @@ class StructureRecognitionPanel(Panel.Panel):
     def create_display_computation(self):
         data_item = self.document_controller.selected_data_item
 
-        computation = self.document_model.create_computation()
+        # computation = self.document_model.create_computation()
 
-        display_data_channel = self.document_model.get_display_item_for_data_item(data_item).display_data_channel
-        specifier_dict = {"version": 1, "type": "data_source", "uuid": str(display_data_channel.uuid)}
-        computation.create_object('input_data_item', specifier_dict)
-        # self.x = computation.create_variable(name='x', value_type='integral', value=70)
-
-        output_data_item = self.library.create_data_item_from_data(
-            np.zeros(data_item.xdata.data.shape[-2:] + (3,), dtype=np.uint8))
-
-        computation.create_result('output_data_item', output_data_item.specifier.rpc_dict)
-        computation.processing_id = 'structure-recognition.visualize'
-
-        self.document_controller.document_model.append_computation(computation)
+        # display_data_channel = self.document_model.get_display_item_for_data_item(data_item).display_data_channel
+        # specifier_dict = {"version": 1, "type": "data_source", "uuid": str(display_data_channel.uuid)}
+        # computation.create_object('input_data_item', specifier_dict)
+        # # self.x = computation.create_variable(name='x', value_type='integral', value=70)
+        #
+        # output_data_item = self.library.create_data_item_from_data(
+        #     np.zeros(data_item.xdata.data.shape[-2:] + (3,), dtype=np.uint8))
+        #
+        # computation.create_result('output_data_item', output_data_item.specifier.rpc_dict)
+        # computation.processing_id = 'structure-recognition.visualize'
+        #
+        # self.document_controller.document_model.append_computation(computation)
 
     def process_sequence(self):
         data_item = self.document_controller.selected_data_item
@@ -583,21 +688,19 @@ class VisualizeStructureRecognition:
         self.computation = computation
 
     def execute(self, input_data_item):
+        print('execute')
         sequence_index = input_data_item.data_item._DataItem__display_item.display_data_channel.sequence_index
         image = input_data_item.data_item.display_xdata.data
 
-        points = input_data_item.data_item.metadata['structure-recognition']['frames'][str(sequence_index)]
+        # points = input_data_item.data_item.metadata['structure-recognition']['frames'][str(sequence_index)]
 
         image = ((image - np.min(image, axis=(-2, -1), keepdims=True)) /
                  np.ptp(image, axis=(-2, -1), keepdims=True) * 255).astype(np.uint8)
         self.image = np.tile(image[..., None], (len(image.shape) * (1,)) + (3,))
 
-        for point in points.values():
-            position = np.round(point['position']).astype(np.int)
-            cv2.circle(self.image, (position[0], position[1]), 3, (0, 0, 255), -1)
-
-
-
+        # for point in points.values():
+        #    position = np.round(point['position']).astype(np.int)
+        #    cv2.circle(self.image, (position[0], position[1]), 3, (0, 0, 255), -1)
 
         # self.image = add_points(points, image, 3, (0, 0, 255))
 

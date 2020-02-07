@@ -70,6 +70,13 @@ def add_points(points, image, size, colors):
     return image
 
 
+def float_images_to_rgb(images):
+    images = ((images - np.min(images, axis=(-2, -1), keepdims=True)) /
+             np.ptp(images, axis=(-2, -1), keepdims=True) * 255).astype(np.uint8)
+    images = np.tile(images[..., None], (len(images.shape) * (1,)) + (3,))
+    return images
+
+
 def create_visualization(image, density, segmentation, points, parameters):
     if parameters['background'] == 'image':
         image = image
