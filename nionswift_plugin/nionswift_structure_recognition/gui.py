@@ -125,7 +125,7 @@ class EditSection(Section):
 
         self.select_push_button.on_clicked = self.start_selecting
         self.clear_selection_push_button.on_clicked = self.clear_selection
-        self.delete_selected_push_button.on_clicked = self.clear_selection
+        self.delete_selected_push_button.on_clicked = self.delete_selection
 
         # self.apply_or_cancel_edits_ui_change()
         self.add_widget_to_content(self.start_apply_cancel_edits_row)
@@ -134,6 +134,7 @@ class EditSection(Section):
         self.add_widget_to_content(self.delete_selected_push_button)
 
         self.apply_or_cancel_edits_ui_change()
+        self.original_mouse_clicked = None
 
     def apply_or_cancel_edits_ui_change(self):
         self.start_apply_cancel_edits_row.remove_all()
@@ -156,7 +157,7 @@ class EditSection(Section):
 
         self.select_push_button.enabled = True
         self.clear_selection_push_button.enabled = True
-        self.delete_selected_push_button.enabled = False
+        self.delete_selected_push_button.enabled = True
 
         apply_edits_push_button.on_clicked = self.apply_edits
         cancel_edits_push_button.on_clicked = self.cancel_edits
@@ -170,16 +171,25 @@ class EditSection(Section):
         self.edited_data_item = None
         self.main.edited_metadata = None
         self.apply_or_cancel_edits_ui_change()
+        self.main.update_visualization()
 
     def apply_edits(self):
         self.apply_or_cancel_edits_ui_change()
+        self.edited_data_item.metadata = self.main.edited_metadata
+        self.edited_data_item = None
+        self.main.edited_metadata = None
+        self.apply_or_cancel_edits_ui_change()
+        self.main.update_visualization()
 
     def _overload_on_mouse_clicked(self, func):
-        original_mouse_clicked = self.main.document_controller.selected_display_panel.canvas_widget.on_mouse_clicked
+        display_panel = self.main.document_controller.selected_display_panel
+
+        if self.original_mouse_clicked is None:
+            self.original_mouse_clicked = display_panel.canvas_widget.on_mouse_clicked
 
         def on_mouse_clicked(x, y, modifiers):
-            original_mouse_clicked(x, y, modifiers)
-            display_panel = self.main.document_controller.selected_display_panel
+            self.original_mouse_clicked(x, y, modifiers)
+
             canvas_item = display_panel.root_container._RootCanvasItem__mouse_tracking_canvas_item
             if canvas_item:
                 canvas_item_point = display_panel.root_container.map_to_canvas_item(Geometry.IntPoint(y=y, x=x),
@@ -194,34 +204,56 @@ class EditSection(Section):
         if self.main.get_selected_data_item() is not self.edited_data_item:
             return
 
-        for i in self.main.edited_metadata['structure-recognition']['frames'].keys():
-            for j in self.main.edited_metadata['structure-recognition']['frames'][i].keys():
-                self.main.edited_metadata['structure-recognition']['frames'][i][j]['selected'] = False
+        for i in self.main.edited_metadata['structure-recognition'].keys():
+            for j in self.main.edited_metadata['structure-recognition'][i].keys():
+                self.main.edited_metadata['structure-recognition'][i][j]['selected'] = False
 
         self.main.update_visualization()
+
+    def delete_selection(self):
+        if self.main.get_selected_data_item() is not self.edited_data_item:
+            return
+
+        new_edited_metadata = {'structure-recognition': {}}
+
+
+        for i in self.main.edited_metadata['structure-recognition'].keys():
+            new_edited_metadata['structure-recognition'][i] = {}
+            k = 0
+            for j in self.main.edited_metadata['structure-recognition'][i].keys():
+                if not self.main.edited_metadata['structure-recognition'][i][j]['selected']:
+                    new_edited_metadata['structure-recognition'][i][str(k)] = \
+                        self.main.edited_metadata['structure-recognition'][i][j]
+                    print(new_edited_metadata['structure-recognition'][i][str(k)])
+                    k += 1
+
+        self.main.edited_metadata = new_edited_metadata
+        self.start_selecting()
+        self.main.update_visualization()
+
+    @functools.lru_cache(maxsize=1)
+    def calculate_kd_tree_for_frame(self, sequence_index):
+        points_dict = self.main.edited_metadata['structure-recognition'][str(sequence_index)]
+        points_array = np.zeros((len(points_dict), 2))
+        for i, point in enumerate(points_dict.values()):
+            points_array[i] = point['position'][::-1]
+        return KDTree(points_array)
+
+    # def stop_selecting(self):
 
     def start_selecting(self):
         if self.main.get_selected_data_item() is not self.edited_data_item:
             return
-
-        @functools.lru_cache(maxsize=1)
-        def calculate_kd_tree_for_frame(sequence_index):
-            points_dict = self.main.edited_metadata['structure-recognition']['frames'][str(sequence_index)]
-            points_array = np.zeros((len(points_dict), 2))
-            for i, point in enumerate(points_dict.values()):
-                points_array[i] = point['position'][::-1]
-            return KDTree(points_array)
 
         def func(x):
             current_data_item = self.main.get_selected_data_item()
 
             if (current_data_item is self.edited_data_item):
                 sequence_index = self.main.get_sequence_index(current_data_item)
-                tree = calculate_kd_tree_for_frame(sequence_index)
+                tree = self.calculate_kd_tree_for_frame(sequence_index)
                 _, idx = tree.query(x, 1)
 
-                self.main.edited_metadata['structure-recognition']['frames'][str(sequence_index)][str(idx)][
-                    'selected'] = True
+                self.main.edited_metadata['structure-recognition'][str(sequence_index)][str(idx)]['selected'] = True
 
                 self.main.update_visualization()
 
@@ -548,9 +580,9 @@ class StructureRecognitionPanel(Panel.Panel):
         data = float_images_to_rgb(data_item.data[sequence_index])
 
         if self.edited_metadata is None:
-            points = data_item.metadata['structure-recognition']['frames'][str(sequence_index)]
+            points = data_item.metadata['structure-recognition'][str(sequence_index)]
         else:
-            points = self.edited_metadata['structure-recognition']['frames'][str(sequence_index)]
+            points = self.edited_metadata['structure-recognition'][str(sequence_index)]
 
         for i, point in enumerate(points.values()):
             position = np.round(point['position']).astype(np.int)
@@ -598,15 +630,15 @@ class StructureRecognitionPanel(Panel.Panel):
 
         metadata = data_item.metadata
         metadata['structure-recognition'] = {}
-        metadata['structure-recognition']['frames'] = {}
+        metadata['structure-recognition'] = {}
 
         for i in range(len(points)):
-            metadata['structure-recognition']['frames'][str(i)] = {}
+            metadata['structure-recognition'][str(i)] = {}
             for j, point in enumerate(points[i].tolist()):
-                metadata['structure-recognition']['frames'][str(i)][str(j)] = {}
-                metadata['structure-recognition']['frames'][str(i)][str(j)]['position'] = point
-                metadata['structure-recognition']['frames'][str(i)][str(j)]['label'] = 0
-                metadata['structure-recognition']['frames'][str(i)][str(j)]['selected'] = False
+                metadata['structure-recognition'][str(i)][str(j)] = {}
+                metadata['structure-recognition'][str(i)][str(j)]['position'] = point
+                metadata['structure-recognition'][str(i)][str(j)]['label'] = 0
+                metadata['structure-recognition'][str(i)][str(j)]['selected'] = False
 
         data_item.metadata = metadata
 
