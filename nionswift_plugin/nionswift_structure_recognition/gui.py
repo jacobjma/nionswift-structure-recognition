@@ -62,9 +62,8 @@ def check_box_template(ui, label):
 
 class Section(Widgets.CompositeWidgetBase):
 
-    def __init__(self, main, section_id, section_title):
-        self.main = main
-        self.ui = self.main.ui
+    def __init__(self, ui, section_id, section_title):
+        self.ui = ui
         self.__section_content_column = self.ui.create_column_widget()
         super().__init__(Widgets.SectionWidget(self.ui, section_title, self.__section_content_column,
                                                'structure-recognition/' + section_id + '/open'))
@@ -80,25 +79,19 @@ class Section(Widgets.CompositeWidgetBase):
 
 class SequencesSection(Section):
 
-    def __init__(self, main):
-        super().__init__(main, 'sequences', 'Sequences')
+    def __init__(self, ui):
+        super().__init__(ui, 'sequences', 'Sequences')
 
         indices_row, self.indices_line_edit = line_edit_template(self.ui, 'Sequence indices', placeholder_text='all')
         analyse_row, analyse_push_button = push_button_template(self.ui, 'Analyse sequence')
-        analyse_push_button.on_clicked = main.process_sequence
-
         new_visualization_row, new_visualization_push_button = push_button_template(self.ui, 'New visualization')
-        # export_row, self.export_push_button = push_button_template(ui, 'Export')
-
         previous_row, previous_push_button = push_button_template(self.ui, 'Previous')
         next_row, next_push_button = push_button_template(self.ui, 'Next')
+        # export_row, self.export_push_button = push_button_template(ui, 'Export')
+
         row = self.ui.create_row_widget()
         row.add(previous_row)
         row.add(next_row)
-
-        new_visualization_push_button.on_clicked = main.new_visualization
-        next_push_button.on_clicked = main.next_frame
-        previous_push_button.on_clicked = main.previous_frame
 
         # self.analyse_sequence_push_button.on_clicked = self.process_sequence
         self.add_widget_to_content(indices_row)
@@ -116,70 +109,43 @@ class SequencesSection(Section):
 
 class EditSection(Section):
 
-    def __init__(self, main):
-        super().__init__(main, 'edit', 'Edit')
-        self.start_apply_cancel_edits_row = self.ui.create_row_widget()
+    def __init__(self, ui):
+        super().__init__(ui, 'edit', 'Edit')
+        start_editing_row, self.start_editing_push_button = push_button_template(self.ui, 'Start editing')
+        apply_edits_row, self.apply_edits_push_button = push_button_template(self.ui, 'Apply edits')
+        cancel_edits_row, self.cancel_edits_push_button = push_button_template(self.ui, 'Cancel edits')
+
+        apply_cancel_edits_row = self.ui.create_row_widget()
+        apply_cancel_edits_row.add(self.apply_edits_push_button)
+        apply_cancel_edits_row.add(self.cancel_edits_push_button)
+
         select_row, self.select_push_button = push_button_template(self.ui, 'Select')
         clear_selection_row, self.clear_selection_push_button = push_button_template(self.ui, 'Clear selection')
+
         delete_selected_row, self.delete_selected_push_button = push_button_template(self.ui, 'Delete selected')
 
-        self.select_push_button.on_clicked = self.start_selecting
-        self.clear_selection_push_button.on_clicked = self.clear_selection
-        self.delete_selected_push_button.on_clicked = self.delete_selection
-
-        # self.apply_or_cancel_edits_ui_change()
-        self.add_widget_to_content(self.start_apply_cancel_edits_row)
+        self.add_widget_to_content(self.start_editing_push_button)
+        self.add_widget_to_content(apply_cancel_edits_row)
         self.add_widget_to_content(self.select_push_button)
         self.add_widget_to_content(self.clear_selection_push_button)
         self.add_widget_to_content(self.delete_selected_push_button)
 
-        self.apply_or_cancel_edits_ui_change()
+        self.stop_editing_ui_change()
         self.original_mouse_clicked = None
 
-    def apply_or_cancel_edits_ui_change(self):
-        self.start_apply_cancel_edits_row.remove_all()
-        start_editing_row, start_editing_push_button = push_button_template(self.ui, 'Start editing')
-        self.start_apply_cancel_edits_row.add(start_editing_push_button)
-
-        self.select_push_button.enabled = False
-        self.clear_selection_push_button.enabled = False
-        self.delete_selected_push_button.enabled = False
-
-        start_editing_push_button.on_clicked = self.start_editing
-
-    def start_edits_ui_change(self):
-        self.start_apply_cancel_edits_row.remove_all()
-        apply_edits_row, apply_edits_push_button = push_button_template(self.ui, 'Apply edits')
-        cancel_edits_row, cancel_edits_push_button = push_button_template(self.ui, 'Cancel edits')
-
-        self.start_apply_cancel_edits_row.add(apply_edits_push_button)
-        self.start_apply_cancel_edits_row.add(cancel_edits_push_button)
-
+    def start_editing_ui_change(self):
+        self.apply_edits_push_button.enabled = True
+        self.cancel_edits_push_button.enabled = True
         self.select_push_button.enabled = True
         self.clear_selection_push_button.enabled = True
         self.delete_selected_push_button.enabled = True
 
-        apply_edits_push_button.on_clicked = self.apply_edits
-        cancel_edits_push_button.on_clicked = self.cancel_edits
-
-    def start_editing(self):
-        self.edited_data_item = self.main.get_selected_data_item()
-        self.main.edited_metadata = self.edited_data_item.metadata
-        self.start_edits_ui_change()
-
-    def cancel_edits(self):
-        self.edited_data_item = None
-        self.main.edited_metadata = None
-        self.apply_or_cancel_edits_ui_change()
-        self.main.update_visualization()
-
-    def apply_edits(self):
-        self.apply_or_cancel_edits_ui_change()
-        self.edited_data_item.metadata = self.main.edited_metadata
-        self.edited_data_item = None
-        self.main.edited_metadata = None
-        self.apply_or_cancel_edits_ui_change()
-        self.main.update_visualization()
+    def stop_editing_ui_change(self):
+        self.apply_edits_push_button.enabled = False
+        self.cancel_edits_push_button.enabled = False
+        self.select_push_button.enabled = False
+        self.clear_selection_push_button.enabled = False
+        self.delete_selected_push_button.enabled = False
 
     def _overload_on_mouse_clicked(self, func):
         display_panel = self.main.document_controller.selected_display_panel
@@ -215,7 +181,6 @@ class EditSection(Section):
             return
 
         new_edited_metadata = {'structure-recognition': {}}
-
 
         for i in self.main.edited_metadata['structure-recognition'].keys():
             new_edited_metadata['structure-recognition'][i] = {}
@@ -271,8 +236,8 @@ class EditSection(Section):
 
 class ScaleDetectionSection(Section):
 
-    def __init__(self, main):
-        super().__init__(main, 'scale-detection', 'Scale Detection')
+    def __init__(self, ui):
+        super().__init__(ui, 'scale-detection', 'Scale Detection')
         lattice_constant_row, self.lattice_constant_line_edit = line_edit_template(self.ui, 'Lattice constant [Å]')
         min_sampling_row, self.min_sampling_line_edit = line_edit_template(self.ui, 'Min. sampling [Å / pixel]')
         crystal_system_row, self.crystal_system_combo_box = combo_box_template(self.ui, 'Crystal system', ['Hexagonal'])
@@ -294,8 +259,8 @@ class ScaleDetectionSection(Section):
 
 class DeepLearningSection(Section):
 
-    def __init__(self, main):
-        super().__init__(main, 'deep-learning', 'Deep Learning')
+    def __init__(self, ui):
+        super().__init__(ui, 'deep-learning', 'Deep Learning')
         mask_weights_row, self.mask_weights_line_edit = line_edit_template(self.ui, 'Mask weights')
         density_weights_row, self.density_weights_line_edit = line_edit_template(self.ui, 'Density weights')
         training_scale_row, self.training_sampling_line_edit = line_edit_template(self.ui, 'Training sampling [A]')
@@ -329,8 +294,8 @@ class DeepLearningSection(Section):
 
 class VisualizationSection(Section):
 
-    def __init__(self, main):
-        super().__init__(main, 'visualization', 'Visualization')
+    def __init__(self, ui):
+        super().__init__(ui, 'visualization', 'Visualization')
 
         background_row, self.background_combo_box = combo_box_template(self.ui, 'Background',
                                                                        ['Image', 'Density', 'Segmentation', 'Solid'])
@@ -492,6 +457,15 @@ class StructureRecognitionPanel(Panel.Panel):
         scroll_area.content = main_column
 
         preset_row, self.preset_combo_box = combo_box_template(ui, 'Preset', ['None', 'Graphene'], indent=True)
+
+        def preset_combo_box_changed(x):
+            self.scale_detection_section.set_preset(x.lower())
+            self.deep_learning_section.set_preset(x.lower())
+            # self.graph_module.set_preset(x.lower())
+            self.visualization_section.set_preset(x.lower())
+
+        self.preset_combo_box.on_current_item_changed = preset_combo_box_changed
+
         run_row, self.run_push_button = push_button_template(ui, 'Start live analysis')
 
         def start_live_analysis():
@@ -504,20 +478,17 @@ class StructureRecognitionPanel(Panel.Panel):
 
         self.run_push_button.on_clicked = start_live_analysis
 
-        self.scale_detection_section = ScaleDetectionSection(self)
-        self.deep_learning_section = DeepLearningSection(self)
-        self.visualization_section = VisualizationSection(self)
-        self.sequences_section = SequencesSection(self)
-        self.edit_section = EditSection(self)
-        self.edited_metadata = None
+        self.scale_detection_section = ScaleDetectionSection(ui)
+        self.deep_learning_section = DeepLearningSection(ui)
+        self.visualization_section = VisualizationSection(ui)
+        self.sequences_section = SequencesSection(ui)
 
-        def preset_combo_box_changed(x):
-            self.scale_detection_section.set_preset(x.lower())
-            self.deep_learning_section.set_preset(x.lower())
-            # self.graph_module.set_preset(x.lower())
-            self.visualization_section.set_preset(x.lower())
+        self.edit_section = EditSection(ui)
 
-        self.preset_combo_box.on_current_item_changed = preset_combo_box_changed
+        def start_editing():
+            self.edit_section.start_editing_ui_change()
+
+        self.edit_section.start_editing_push_button.on_clicked = start_editing
 
         main_column.add(preset_row)
         main_column.add(run_row)
@@ -579,17 +550,10 @@ class StructureRecognitionPanel(Panel.Panel):
         sequence_index = self.get_sequence_index(data_item)
         data = float_images_to_rgb(data_item.data[sequence_index])
 
-        if self.edited_metadata is None:
-            points = data_item.metadata['structure-recognition'][str(sequence_index)]
-        else:
-            points = self.edited_metadata['structure-recognition'][str(sequence_index)]
+        positions = data_item.metadata['structure-recognition'][str(sequence_index)]['positions']
 
-        for i, point in enumerate(points.values()):
-            position = np.round(point['position']).astype(np.int)
-
-            if point['selected']:
-                cv2.circle(data, (position[0], position[1]), 3 + 1, (0, 255, 0), -1)
-
+        for position in positions:
+            position = np.round(position).astype(np.int)
             cv2.circle(data, (position[0], position[1]), 3, (0, 0, 255), -1)
 
         with self.library.data_ref_for_data_item(visualizing_data_item) as data_ref:
@@ -626,19 +590,15 @@ class StructureRecognitionPanel(Panel.Panel):
         data_item = self.document_controller.selected_data_item
 
         images = data_item.xdata.data
-        points = self.model.predict_batches(images)
+        positions = self.model.predict_batches(images)
+        labels = [np.zeros(len(positions[i]), dtype=np.int) for i in range(len(positions))]
 
         metadata = data_item.metadata
         metadata['structure-recognition'] = {}
-        metadata['structure-recognition'] = {}
 
-        for i in range(len(points)):
-            metadata['structure-recognition'][str(i)] = {}
-            for j, point in enumerate(points[i].tolist()):
-                metadata['structure-recognition'][str(i)][str(j)] = {}
-                metadata['structure-recognition'][str(i)][str(j)]['position'] = point
-                metadata['structure-recognition'][str(i)][str(j)]['label'] = 0
-                metadata['structure-recognition'][str(i)][str(j)]['selected'] = False
+        for i in range(len(positions)):
+            metadata['structure-recognition'][i] = {'positions': positions[i].tolist(),
+                                                    'labels': labels[i].tolist()}
 
         data_item.metadata = metadata
 
