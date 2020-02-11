@@ -351,17 +351,20 @@ def build_model_from_dict(parameters):
     def preprocess(images):
         pass
 
-    def discretization_model(density):
+    def discretization_model(density, classes):
         nms_distance_pixels = int(
             np.round(parameters['nms']['distance'] / parameters['deep_learning']['training_sampling']))
 
-        accepted = non_maximum_suppresion(density, distance=nms_distance_pixels,
-                                          threshold=parameters['nms']['threshold'])
+        accepted, probabilities = non_maximum_suppresion(density, distance=nms_distance_pixels,
+                                                         threshold=parameters['nms']['threshold'], classes=classes)
+
+        # print(probabilities)
 
         points = [np.array(np.where(accepted[i])).T for i in range(accepted.shape[0])]
 
-        # probabilities = probabilities[0, :, points[:, 0], points[:, 1]]
-        return points
+        probabilities = [probabilities[0, :, p[:, 0], p[:, 1]] for p in points]
+
+        return points, probabilities
 
     model = AtomRecognitionModel(mask_model, density_model,
                                  training_sampling=parameters['deep_learning']['training_sampling'],
@@ -473,8 +476,12 @@ class AtomRecognitionModel:
         density = mask * density
         density = density.detach().cpu().numpy()
 
-        points = self.discretization_model(density)
+        classes = segmentation[:, :-1].detach().cpu().numpy()
+
+        points, probabilities = self.discretization_model(density, classes)
         points = [self.postprocess_points(p, density.shape[-2:], orig_shape, sampling)[:, ::-1] for p in points]
         # points = [self.postprocess_points(p, density.shape[-2:], orig_shape, sampling) for p in points]
 
-        return points
+        output = {'points': points, 'probabilities': probabilities}
+
+        return output

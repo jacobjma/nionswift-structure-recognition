@@ -4,7 +4,7 @@
     "mask_model": "graphene_mask.pt",
     "density_model": "graphene_density.pt",
     "training_sampling": 0.058,
-    "margin": 2
+    "margin": 4
   },
   "scale": {
     "crystal_system": "hexagonal",
