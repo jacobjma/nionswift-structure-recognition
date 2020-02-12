@@ -13,7 +13,6 @@ def test_build():
     points = output['points'][0]
     probabilities = output['probabilities'][0]
 
-
     import matplotlib.pyplot as plt
     plt.imshow(images, cmap='gray')
     plt.scatter(*points.T, c=probabilities[:, 1], s=5, cmap='autumn')

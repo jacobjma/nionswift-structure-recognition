@@ -358,16 +358,13 @@ def build_model_from_dict(parameters):
         accepted, probabilities = non_maximum_suppresion(density, distance=nms_distance_pixels,
                                                          threshold=parameters['nms']['threshold'], classes=classes)
 
-        # print(probabilities)
-
         points = [np.array(np.where(accepted[i])).T for i in range(accepted.shape[0])]
-
         probabilities = [probabilities[0, :, p[:, 0], p[:, 1]] for p in points]
-
         return points, probabilities
 
     model = AtomRecognitionModel(mask_model, density_model,
                                  training_sampling=parameters['deep_learning']['training_sampling'],
+                                 margin=parameters['deep_learning']['training_sampling'],
                                  scale_model=scale_model, discretization_model=discretization_model)
 
     return model
@@ -406,12 +403,13 @@ class BatchGenerator:
 
 class AtomRecognitionModel:
 
-    def __init__(self, mask_model, density_model, training_sampling, scale_model, discretization_model):
+    def __init__(self, mask_model, density_model, training_sampling, margin, scale_model, discretization_model):
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         # self.preprocessing = preprocessing
         self.mask_model = mask_model
         self.density_model = density_model
         self.training_sampling = training_sampling
+        self.margin = margin
         self.scale_model = scale_model
         self.discretization_model = discretization_model
         self.last_density = None
@@ -452,12 +450,14 @@ class AtomRecognitionModel:
     def predict_batches(self, images, max_batch=4):
         batch_generator = BatchGenerator(len(images), max_batch)
 
-        points = []
+        output = {'points': [], 'probabilities': []}
         for i, (start, size) in enumerate(batch_generator.generate()):
             print('Mini batch: {} of {}'.format(i, batch_generator.n_batches))
-            points += self.predict(images[start:start + size])
+            new_output = self.predict(images[start:start + size])
+            output['points'] += new_output['points']
+            output['probabilities'] += new_output['probabilities']
 
-        return points
+        return output
 
     def predict(self, images):
         images = torch.tensor(images).to(self.device)
@@ -483,5 +483,4 @@ class AtomRecognitionModel:
         # points = [self.postprocess_points(p, density.shape[-2:], orig_shape, sampling) for p in points]
 
         output = {'points': points, 'probabilities': probabilities}
-
         return output

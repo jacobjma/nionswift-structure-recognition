@@ -83,10 +83,10 @@ class SequencesSection(Section):
         super().__init__(ui, 'sequences', 'Sequences')
 
         indices_row, self.indices_line_edit = line_edit_template(self.ui, 'Sequence indices', placeholder_text='all')
-        analyse_row, analyse_push_button = push_button_template(self.ui, 'Analyse sequence')
-        new_visualization_row, new_visualization_push_button = push_button_template(self.ui, 'New visualization')
-        previous_row, previous_push_button = push_button_template(self.ui, 'Previous')
-        next_row, next_push_button = push_button_template(self.ui, 'Next')
+        analyse_row, self.analyse_push_button = push_button_template(self.ui, 'Analyse sequence')
+        new_visualization_row, self.new_visualization_push_button = push_button_template(self.ui, 'New visualization')
+        previous_row, self.previous_push_button = push_button_template(self.ui, 'Previous')
+        next_row, self.next_push_button = push_button_template(self.ui, 'Next')
         # export_row, self.export_push_button = push_button_template(ui, 'Export')
 
         row = self.ui.create_row_widget()
@@ -115,117 +115,47 @@ class EditSection(Section):
         apply_edits_row, self.apply_edits_push_button = push_button_template(self.ui, 'Apply edits')
         cancel_edits_row, self.cancel_edits_push_button = push_button_template(self.ui, 'Cancel edits')
 
+        select_row, self.select_push_button = push_button_template(self.ui, 'Select')
+        add_row, self.add_push_button = push_button_template(self.ui, 'Add')
+
+        select_add_row = self.ui.create_row_widget()
+        select_add_row.add(self.select_push_button)
+        select_add_row.add(self.add_push_button)
+
         apply_cancel_edits_row = self.ui.create_row_widget()
         apply_cancel_edits_row.add(self.apply_edits_push_button)
         apply_cancel_edits_row.add(self.cancel_edits_push_button)
 
-        select_row, self.select_push_button = push_button_template(self.ui, 'Select')
         clear_selection_row, self.clear_selection_push_button = push_button_template(self.ui, 'Clear selection')
-
         delete_selected_row, self.delete_selected_push_button = push_button_template(self.ui, 'Delete selected')
+        label_selected_row, self.label_selected_push_button = push_button_template(self.ui,
+                                                                                       'Label selected')
 
         self.add_widget_to_content(self.start_editing_push_button)
         self.add_widget_to_content(apply_cancel_edits_row)
-        self.add_widget_to_content(self.select_push_button)
+        self.add_widget_to_content(select_add_row)
         self.add_widget_to_content(self.clear_selection_push_button)
         self.add_widget_to_content(self.delete_selected_push_button)
 
         self.stop_editing_ui_change()
-        self.original_mouse_clicked = None
 
     def start_editing_ui_change(self):
+        self.start_editing_push_button.enabled = False
         self.apply_edits_push_button.enabled = True
         self.cancel_edits_push_button.enabled = True
         self.select_push_button.enabled = True
+        self.add_push_button.enabled = True
         self.clear_selection_push_button.enabled = True
         self.delete_selected_push_button.enabled = True
 
     def stop_editing_ui_change(self):
+        self.start_editing_push_button.enabled = True
         self.apply_edits_push_button.enabled = False
         self.cancel_edits_push_button.enabled = False
         self.select_push_button.enabled = False
+        self.add_push_button.enabled = False
         self.clear_selection_push_button.enabled = False
         self.delete_selected_push_button.enabled = False
-
-    def _overload_on_mouse_clicked(self, func):
-        display_panel = self.main.document_controller.selected_display_panel
-
-        if self.original_mouse_clicked is None:
-            self.original_mouse_clicked = display_panel.canvas_widget.on_mouse_clicked
-
-        def on_mouse_clicked(x, y, modifiers):
-            self.original_mouse_clicked(x, y, modifiers)
-
-            canvas_item = display_panel.root_container._RootCanvasItem__mouse_tracking_canvas_item
-            if canvas_item:
-                canvas_item_point = display_panel.root_container.map_to_canvas_item(Geometry.IntPoint(y=y, x=x),
-                                                                                    canvas_item)
-                if hasattr(canvas_item, 'map_widget_to_image'):
-                    image_point = canvas_item.map_widget_to_image(canvas_item_point)
-                    func(image_point)
-
-        self.main.document_controller.selected_display_panel.canvas_widget.on_mouse_clicked = on_mouse_clicked
-
-    def clear_selection(self):
-        if self.main.get_selected_data_item() is not self.edited_data_item:
-            return
-
-        for i in self.main.edited_metadata['structure-recognition'].keys():
-            for j in self.main.edited_metadata['structure-recognition'][i].keys():
-                self.main.edited_metadata['structure-recognition'][i][j]['selected'] = False
-
-        self.main.update_visualization()
-
-    def delete_selection(self):
-        if self.main.get_selected_data_item() is not self.edited_data_item:
-            return
-
-        new_edited_metadata = {'structure-recognition': {}}
-
-        for i in self.main.edited_metadata['structure-recognition'].keys():
-            new_edited_metadata['structure-recognition'][i] = {}
-            k = 0
-            for j in self.main.edited_metadata['structure-recognition'][i].keys():
-                if not self.main.edited_metadata['structure-recognition'][i][j]['selected']:
-                    new_edited_metadata['structure-recognition'][i][str(k)] = \
-                        self.main.edited_metadata['structure-recognition'][i][j]
-                    print(new_edited_metadata['structure-recognition'][i][str(k)])
-                    k += 1
-
-        self.main.edited_metadata = new_edited_metadata
-        self.start_selecting()
-        self.main.update_visualization()
-
-    @functools.lru_cache(maxsize=1)
-    def calculate_kd_tree_for_frame(self, sequence_index):
-        points_dict = self.main.edited_metadata['structure-recognition'][str(sequence_index)]
-        points_array = np.zeros((len(points_dict), 2))
-        for i, point in enumerate(points_dict.values()):
-            points_array[i] = point['position'][::-1]
-        return KDTree(points_array)
-
-    # def stop_selecting(self):
-
-    def start_selecting(self):
-        if self.main.get_selected_data_item() is not self.edited_data_item:
-            return
-
-        def func(x):
-            current_data_item = self.main.get_selected_data_item()
-
-            if (current_data_item is self.edited_data_item):
-                sequence_index = self.main.get_sequence_index(current_data_item)
-                tree = self.calculate_kd_tree_for_frame(sequence_index)
-                _, idx = tree.query(x, 1)
-
-                self.main.edited_metadata['structure-recognition'][str(sequence_index)][str(idx)]['selected'] = True
-
-                self.main.update_visualization()
-
-        self._overload_on_mouse_clicked(func)
-
-    def stop_editing(self):
-        self.cursor_changed_event_listener = None  # TODO : Actually terminate the thread
 
     def set_preset(self, name):
         pass
@@ -466,32 +396,75 @@ class StructureRecognitionPanel(Panel.Panel):
 
         self.preset_combo_box.on_current_item_changed = preset_combo_box_changed
 
-        run_row, self.run_push_button = push_button_template(ui, 'Start live analysis')
+        start_live_analysis_row, self.start_live_analysis_push_button = push_button_template(ui, 'Live analysis')
 
-        def start_live_analysis():
-            if self.stop_live_analysis_event.is_set():
-                self.start_live_analysis()
-                self.run_push_button.text = 'Abort live analysis'
-            else:
-                self.stop_live_analysis()
-                self.run_push_button.text = 'Start live analysis'
+        def on_start_live_analysis():
+            self.start_live_analysis()
+            self.abort_live_analysis_push_button.enabled = True
 
-        self.run_push_button.on_clicked = start_live_analysis
+        self.start_live_analysis_push_button.on_clicked = on_start_live_analysis
+
+        abort_live_analysis_row, self.abort_live_analysis_push_button = push_button_template(ui, 'Abort')
+
+        def on_stop_live_analysis():
+            self.stop_live_analysis()
+            self.abort_live_analysis_push_button.enabled = True
+
+        self.abort_live_analysis_push_button.on_clicked = on_stop_live_analysis
+        self.abort_live_analysis_push_button.enabled = False
+
+        start_stop_live_analysis_row = ui.create_row_widget()
+        start_stop_live_analysis_row.add(self.start_live_analysis_push_button)
+        start_stop_live_analysis_row.add(self.abort_live_analysis_push_button)
 
         self.scale_detection_section = ScaleDetectionSection(ui)
         self.deep_learning_section = DeepLearningSection(ui)
         self.visualization_section = VisualizationSection(ui)
         self.sequences_section = SequencesSection(ui)
 
+        self.sequences_section.analyse_push_button.on_clicked = self.process_sequence
+        self.sequences_section.new_visualization_push_button.on_clicked = self.new_visualization
+        self.sequences_section.next_push_button.on_clicked = self.next_frame
+        self.sequences_section.previous_push_button.on_clicked = self.previous_frame
+
         self.edit_section = EditSection(ui)
 
         def start_editing():
             self.edit_section.start_editing_ui_change()
+            self.edit_section.select_push_button.enabled = False
+            self.start_editing()
+
+        def apply_edits():
+            self.edit_section.stop_editing_ui_change()
+            self.apply_edits()
+
+        def cancel_edits():
+            self.edit_section.stop_editing_ui_change()
+            self.cancel_edits()
+
+        def start_selecting():
+            self.edit_section.select_push_button.enabled = False
+            self.edit_section.add_push_button.enabled = True
+            self.start_selecting()
+
+        def start_adding():
+            self.edit_section.add_push_button.enabled = False
+            self.edit_section.select_push_button.enabled = True
+            self.start_adding()
 
         self.edit_section.start_editing_push_button.on_clicked = start_editing
+        self.edit_section.apply_edits_push_button.on_clicked = apply_edits
+        self.edit_section.cancel_edits_push_button.on_clicked = cancel_edits
+        self.edit_section.select_push_button.on_clicked = start_selecting
+        self.edit_section.add_push_button.on_clicked = start_adding
+        self.edit_section.clear_selection_push_button.on_clicked = self.clear_selection
+        self.edit_section.delete_selection_push_button.on_clicked = self.delete_selection
+
+        self.edited_data_item = None
+        self.edited_data = None
 
         main_column.add(preset_row)
-        main_column.add(run_row)
+        main_column.add(start_stop_live_analysis_row)
         main_column.add(self.scale_detection_section)
         main_column.add(self.deep_learning_section)
         main_column.add(self.visualization_section)
@@ -502,16 +475,6 @@ class StructureRecognitionPanel(Panel.Panel):
 
         preset_combo_box_changed('graphene')
         self.update_parameters()
-
-        # import cv2
-
-    def new_visualization(self):
-        data_item = self.document_controller.selected_data_item
-        new_visualization_data_item = self.library.create_data_item_from_data(
-            np.zeros(data_item.data.shape[-2:] + (3,), dtype=np.uint8))
-        self.visualization_data_items[data_item] = new_visualization_data_item
-        self.visualized_data_items[new_visualization_data_item._data_item] = data_item
-        self.update_visualization()
 
     def get_selected_data_item(self):
         try:
@@ -527,6 +490,14 @@ class StructureRecognitionPanel(Panel.Panel):
 
     def get_sequence_index(self, data_item):
         return self.document_model.get_display_item_for_data_item(data_item).display_data_channel.sequence_index
+
+    def new_visualization(self):
+        data_item = self.document_controller.selected_data_item
+        new_visualization_data_item = self.library.create_data_item_from_data(
+            np.zeros(data_item.data.shape[-2:] + (3,), dtype=np.uint8))
+        self.visualization_data_items[data_item] = new_visualization_data_item
+        self.visualized_data_items[new_visualization_data_item._data_item] = data_item
+        self.update_visualization()
 
     def next_frame(self):
         data_item = self.get_selected_data_item()
@@ -550,14 +521,137 @@ class StructureRecognitionPanel(Panel.Panel):
         sequence_index = self.get_sequence_index(data_item)
         data = float_images_to_rgb(data_item.data[sequence_index])
 
-        positions = data_item.metadata['structure-recognition'][str(sequence_index)]['positions']
+        if self.edited_data:
+            points = self.get_edited_data_for_sequence_index(sequence_index)
+        else:
+            points = data_item.metadata['structure-recognition'][str(sequence_index)]
 
-        for position in positions:
-            position = np.round(position).astype(np.int)
-            cv2.circle(data, (position[0], position[1]), 3, (0, 0, 255), -1)
+        for i in range(len(points['points'])):
+            point = np.round(points['points'][i]).astype(np.int)
+
+            if points['selected'][i]:
+                cv2.circle(data, (point[0], point[1]), 3 + 1, (0, 255, 0), -1)
+
+            cv2.circle(data, (point[0], point[1]), 3, (0, 0, 255), -1)
 
         with self.library.data_ref_for_data_item(visualizing_data_item) as data_ref:
             data_ref.data = data
+
+    def start_editing(self):
+        self.edited_data_item = self.get_selected_data_item()
+        self.edited_data = {}
+        self.original_mouse_clicked = self.document_controller.selected_display_panel.canvas_widget.on_mouse_clicked
+        self.start_selecting()
+
+    def apply_edits(self):
+        new_metadata = self.edited_data_item.metadata
+        for key, value in self.edited_data.items():
+            new_metadata['structure-recognition'][key] = value
+        self.edited_data_item.metadata = new_metadata
+        self.unoverload_on_mouse_clicked()
+
+    def cancel_edits(self):
+        self.edited_data_item = None
+        self.edited_data = None
+        self.unoverload_on_mouse_clicked()
+        self.update_visualization()
+
+    def get_edited_data_for_sequence_index(self, i):
+        try:
+            return self.edited_data[str(i)]
+        except:
+            # This copies the data
+            self.edited_data[str(i)] = self.edited_data_item.metadata['structure-recognition'][str(i)]
+            return self.edited_data[str(i)]
+
+    def start_selecting(self):
+        if self.edited_data_item is None:
+            return
+
+        if self.get_selected_data_item() is not self.edited_data_item:
+            return
+
+        def func(x):
+            current_data_item = self.get_selected_data_item()
+
+            if (current_data_item is self.edited_data_item):
+                sequence_index = self.get_sequence_index(current_data_item)
+
+                edited_data = self.get_edited_data_for_sequence_index(sequence_index)
+
+                tree = KDTree(edited_data['points'])
+                _, idx = tree.query(x[::-1], 1)
+
+                edited_data['selected'][idx] = True
+                self.update_visualization()
+
+        self.unoverload_on_mouse_clicked()
+        self.overload_on_mouse_clicked(func)
+
+    def start_adding(self):
+        if self.edited_data_item is None:
+            return
+
+        if self.get_selected_data_item() is not self.edited_data_item:
+            return
+
+        def func(x):
+            current_data_item = self.get_selected_data_item()
+
+            if (current_data_item is self.edited_data_item):
+                sequence_index = self.get_sequence_index(current_data_item)
+                edited_data = self.get_edited_data_for_sequence_index(sequence_index)
+
+                edited_data['points'] += [[x[1], x[0]]]
+                edited_data['labels'] += [0]
+                edited_data['selected'] += [False]
+
+                self.update_visualization()
+
+        self.unoverload_on_mouse_clicked()
+        self.overload_on_mouse_clicked(func)
+
+    def overload_on_mouse_clicked(self, func):
+        display_panel = self.document_controller.selected_display_panel
+
+        def on_mouse_clicked(x, y, modifiers):
+            self.original_mouse_clicked(x, y, modifiers)
+
+            canvas_item = display_panel.root_container._RootCanvasItem__mouse_tracking_canvas_item
+            if canvas_item:
+                canvas_item_point = display_panel.root_container.map_to_canvas_item(Geometry.IntPoint(y=y, x=x),
+                                                                                    canvas_item)
+                if hasattr(canvas_item, 'map_widget_to_image'):
+                    image_point = canvas_item.map_widget_to_image(canvas_item_point)
+                    func(image_point)
+
+        self.document_controller.selected_display_panel.canvas_widget.on_mouse_clicked = on_mouse_clicked
+
+    def unoverload_on_mouse_clicked(self):
+        self.document_controller.selected_display_panel.canvas_widget.on_mouse_clicked = self.original_mouse_clicked
+
+    def clear_selection(self):
+        if self.edited_data_item is None:
+            return
+
+        if self.get_selected_data_item() is not self.edited_data_item:
+            return
+
+        for value in self.edited_data.values():
+            value['selected'] = [False] * len(value['points'])
+
+        self.update_visualization()
+
+    def delete_selection(self):
+        if self.get_selected_data_item() is not self.edited_data_item:
+            return
+
+        for value in self.edited_data.values():
+            value['points'] = [p for p, c in zip(value['points'], value['selected']) if not c]
+            value['labels'] = [p for p, c in zip(value['points'], value['labels']) if not c]
+            value['selected'] = [False] * len(value['points'])
+
+        self.update_visualization()
 
     def export_metadata(self):
         pass
@@ -590,15 +684,17 @@ class StructureRecognitionPanel(Panel.Panel):
         data_item = self.document_controller.selected_data_item
 
         images = data_item.xdata.data
-        positions = self.model.predict_batches(images)
-        labels = [np.zeros(len(positions[i]), dtype=np.int) for i in range(len(positions))]
+        points = self.model.predict_batches(images)['points']
+
+        labels = [np.zeros(len(points[i]), dtype=np.int) for i in range(len(points))]
 
         metadata = data_item.metadata
         metadata['structure-recognition'] = {}
 
-        for i in range(len(positions)):
-            metadata['structure-recognition'][i] = {'positions': positions[i].tolist(),
-                                                    'labels': labels[i].tolist()}
+        for i in range(len(points)):
+            metadata['structure-recognition'][str(i)] = {'points': points[i].tolist(),
+                                                         'labels': labels[i].tolist(),
+                                                         'selected': [False] * len(points[i])}
 
         data_item.metadata = metadata
 
