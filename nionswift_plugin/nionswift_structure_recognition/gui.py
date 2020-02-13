@@ -129,7 +129,7 @@ class EditSection(Section):
         clear_selection_row, self.clear_selection_push_button = push_button_template(self.ui, 'Clear selection')
         delete_selected_row, self.delete_selected_push_button = push_button_template(self.ui, 'Delete selected')
         label_selected_row, self.label_selected_push_button = push_button_template(self.ui,
-                                                                                       'Label selected')
+                                                                                   'Label selected')
 
         self.add_widget_to_content(self.start_editing_push_button)
         self.add_widget_to_content(apply_cancel_edits_row)
@@ -458,7 +458,7 @@ class StructureRecognitionPanel(Panel.Panel):
         self.edit_section.select_push_button.on_clicked = start_selecting
         self.edit_section.add_push_button.on_clicked = start_adding
         self.edit_section.clear_selection_push_button.on_clicked = self.clear_selection
-        self.edit_section.delete_selection_push_button.on_clicked = self.delete_selection
+        self.edit_section.delete_selected_push_button.on_clicked = self.delete_selection
 
         self.edited_data_item = None
         self.edited_data = None
@@ -489,7 +489,10 @@ class StructureRecognitionPanel(Panel.Panel):
             return None
 
     def get_sequence_index(self, data_item):
-        return self.document_model.get_display_item_for_data_item(data_item).display_data_channel.sequence_index
+        if data_item.is_sequence:
+            return self.document_model.get_display_item_for_data_item(data_item).display_data_channel.sequence_index
+        else:
+            return 0
 
     def new_visualization(self):
         data_item = self.document_controller.selected_data_item
@@ -519,7 +522,11 @@ class StructureRecognitionPanel(Panel.Panel):
             return
 
         sequence_index = self.get_sequence_index(data_item)
-        data = float_images_to_rgb(data_item.data[sequence_index])
+
+        if data_item.is_sequence:
+            data = float_images_to_rgb(data_item.data[sequence_index])
+        else:
+            data = float_images_to_rgb(data_item.data)
 
         if self.edited_data:
             points = self.get_edited_data_for_sequence_index(sequence_index)
@@ -529,8 +536,9 @@ class StructureRecognitionPanel(Panel.Panel):
         for i in range(len(points['points'])):
             point = np.round(points['points'][i]).astype(np.int)
 
-            if points['selected'][i]:
-                cv2.circle(data, (point[0], point[1]), 3 + 1, (0, 255, 0), -1)
+            if self.edited_data:
+                if points['selected'][i]:
+                    cv2.circle(data, (point[0], point[1]), 3 + 1, (0, 255, 0), -1)
 
             cv2.circle(data, (point[0], point[1]), 3, (0, 0, 255), -1)
 
@@ -541,19 +549,26 @@ class StructureRecognitionPanel(Panel.Panel):
         self.edited_data_item = self.get_selected_data_item()
         self.edited_data = {}
         self.original_mouse_clicked = self.document_controller.selected_display_panel.canvas_widget.on_mouse_clicked
+        self.original_key_pressed = self.document_controller.selected_display_panel.canvas_widget.on_key_pressed
         self.start_selecting()
+        self.overload_on_key_pressed(self.move_points)
 
     def apply_edits(self):
+        self.unoverload_on_mouse_clicked()
+        self.unoverload_on_key_pressed()
         new_metadata = self.edited_data_item.metadata
         for key, value in self.edited_data.items():
             new_metadata['structure-recognition'][key] = value
         self.edited_data_item.metadata = new_metadata
-        self.unoverload_on_mouse_clicked()
-
-    def cancel_edits(self):
         self.edited_data_item = None
         self.edited_data = None
+        self.update_visualization()
+
+    def cancel_edits(self):
         self.unoverload_on_mouse_clicked()
+        self.unoverload_on_key_pressed()
+        self.edited_data_item = None
+        self.edited_data = None
         self.update_visualization()
 
     def get_edited_data_for_sequence_index(self, i):
@@ -562,6 +577,7 @@ class StructureRecognitionPanel(Panel.Panel):
         except:
             # This copies the data
             self.edited_data[str(i)] = self.edited_data_item.metadata['structure-recognition'][str(i)]
+            self.edited_data[str(i)]['selected'] = [False] * len(self.edited_data[str(i)]['points'])
             return self.edited_data[str(i)]
 
     def start_selecting(self):
@@ -580,10 +596,11 @@ class StructureRecognitionPanel(Panel.Panel):
                 edited_data = self.get_edited_data_for_sequence_index(sequence_index)
 
                 tree = KDTree(edited_data['points'])
-                _, idx = tree.query(x[::-1], 1)
+                _, idx = tree.query(x[::-1], 1, distance_upper_bound=20)
 
-                edited_data['selected'][idx] = True
-                self.update_visualization()
+                if idx < len(edited_data['selected']):
+                    edited_data['selected'][idx] = not edited_data['selected'][idx]
+                    self.update_visualization()
 
         self.unoverload_on_mouse_clicked()
         self.overload_on_mouse_clicked(func)
@@ -618,6 +635,7 @@ class StructureRecognitionPanel(Panel.Panel):
             self.original_mouse_clicked(x, y, modifiers)
 
             canvas_item = display_panel.root_container._RootCanvasItem__mouse_tracking_canvas_item
+
             if canvas_item:
                 canvas_item_point = display_panel.root_container.map_to_canvas_item(Geometry.IntPoint(y=y, x=x),
                                                                                     canvas_item)
@@ -629,6 +647,17 @@ class StructureRecognitionPanel(Panel.Panel):
 
     def unoverload_on_mouse_clicked(self):
         self.document_controller.selected_display_panel.canvas_widget.on_mouse_clicked = self.original_mouse_clicked
+
+    def overload_on_key_pressed(self, func):
+
+        def on_key_pressed(key):
+            self.original_key_pressed(key)
+            func(key)
+
+        self.document_controller.selected_display_panel.canvas_widget.on_key_pressed = on_key_pressed
+
+    def unoverload_on_key_pressed(self):
+        self.document_controller.selected_display_panel.canvas_widget.on_key_pressed = self.original_key_pressed
 
     def clear_selection(self):
         if self.edited_data_item is None:
@@ -653,6 +682,32 @@ class StructureRecognitionPanel(Panel.Panel):
 
         self.update_visualization()
 
+    def move_points(self, key):
+        if self.edited_data_item is None:
+            return
+
+        if self.get_selected_data_item() is not self.edited_data_item:
+            return
+
+        current_data_item = self.get_selected_data_item()
+
+        sequence_index = self.get_sequence_index(current_data_item)
+
+        edited_data = self.get_edited_data_for_sequence_index(sequence_index)
+
+        for p, s in zip(edited_data['points'], edited_data['selected']):
+            if s:
+                if key.text == 'a':
+                    p[0] -= 1
+                elif key.text == 'd':
+                    p[0] += 1
+                elif key.text == 'w':
+                    p[1] -= 1
+                elif key.text == 's':
+                    p[1] += 1
+
+        self.update_visualization()
+
     def export_metadata(self):
         pass
 
@@ -662,28 +717,11 @@ class StructureRecognitionPanel(Panel.Panel):
         # print(self.document_controller.selected_display_panel)
         # self.x.value = 5
 
-    def create_display_computation(self):
-        data_item = self.document_controller.selected_data_item
-
-        # computation = self.document_model.create_computation()
-
-        # display_data_channel = self.document_model.get_display_item_for_data_item(data_item).display_data_channel
-        # specifier_dict = {"version": 1, "type": "data_source", "uuid": str(display_data_channel.uuid)}
-        # computation.create_object('input_data_item', specifier_dict)
-        # # self.x = computation.create_variable(name='x', value_type='integral', value=70)
-        #
-        # output_data_item = self.library.create_data_item_from_data(
-        #     np.zeros(data_item.xdata.data.shape[-2:] + (3,), dtype=np.uint8))
-        #
-        # computation.create_result('output_data_item', output_data_item.specifier.rpc_dict)
-        # computation.processing_id = 'structure-recognition.visualize'
-        #
-        # self.document_controller.document_model.append_computation(computation)
-
     def process_sequence(self):
         data_item = self.document_controller.selected_data_item
 
         images = data_item.xdata.data
+
         points = self.model.predict_batches(images)['points']
 
         labels = [np.zeros(len(points[i]), dtype=np.int) for i in range(len(points))]
@@ -693,8 +731,7 @@ class StructureRecognitionPanel(Panel.Panel):
 
         for i in range(len(points)):
             metadata['structure-recognition'][str(i)] = {'points': points[i].tolist(),
-                                                         'labels': labels[i].tolist(),
-                                                         'selected': [False] * len(points[i])}
+                                                         'labels': labels[i].tolist()}
 
         data_item.metadata = metadata
 
@@ -782,40 +819,6 @@ class StructureRecognitionPanel(Panel.Panel):
 #     self.thread.start()
 
 
-class VisualizeStructureRecognition:
-
-    def __init__(self, computation, **kwargs):
-        self.computation = computation
-
-    def execute(self, input_data_item):
-        print('execute')
-        sequence_index = input_data_item.data_item._DataItem__display_item.display_data_channel.sequence_index
-        image = input_data_item.data_item.display_xdata.data
-
-        # points = input_data_item.data_item.metadata['structure-recognition']['frames'][str(sequence_index)]
-
-        image = ((image - np.min(image, axis=(-2, -1), keepdims=True)) /
-                 np.ptp(image, axis=(-2, -1), keepdims=True) * 255).astype(np.uint8)
-        self.image = np.tile(image[..., None], (len(image.shape) * (1,)) + (3,))
-
-        # for point in points.values():
-        #    position = np.round(point['position']).astype(np.int)
-        #    cv2.circle(self.image, (position[0], position[1]), 3, (0, 0, 255), -1)
-
-        # self.image = add_points(points, image, 3, (0, 0, 255))
-
-        # descriptor = DataAndMetadata.DataDescriptor(is_sequence=False,
-        #                                             collection_dimension_count=0,
-        #                                             datum_dimension_count=2)
-
-        # self.xdata = DataAndMetadata.new_data_and_metadata(data, data_descriptor=descriptor)
-
-    def commit(self):
-        self.computation.set_referenced_data('output_data_item', self.image)
-
-
 workspace_manager = Workspace.WorkspaceManager()
 workspace_manager.register_panel(StructureRecognitionPanel, "structure-recognition-panel", _("Structure Recognition"),
                                  ["left", "right"], "right")
-
-Symbolic.register_computation_type("structure-recognition.visualize", VisualizeStructureRecognition)

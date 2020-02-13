@@ -448,6 +448,8 @@ class AtomRecognitionModel:
         return points - np.array([padding[0] // 2, padding[1] // 2])
 
     def predict_batches(self, images, max_batch=4):
+        images = torch.tensor(images).to(self.device)
+        images = self.standardize_dims(images)
         batch_generator = BatchGenerator(len(images), max_batch)
 
         output = {'points': [], 'probabilities': []}
