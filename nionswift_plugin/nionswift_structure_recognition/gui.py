@@ -130,6 +130,7 @@ class StructureRecognitionPanelDelegate:
 
         model = self.deep_learning_module.model
 
+
         print('start processing')
         with self.api.library.data_ref_for_data_item(self.output_data_item) as data_ref:
 
