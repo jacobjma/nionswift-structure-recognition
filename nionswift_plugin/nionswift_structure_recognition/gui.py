@@ -88,9 +88,17 @@ class StructureRecognitionPanelDelegate:
 
     def get_camera(self):
         # return self.api.get_instrument_by_id("autostem_controller",version="1")
-        # return self.api.get_hardware_source_by_id("superscan",version="1")
+
+        camera = self.api.get_hardware_source_by_id("superscan", version="1")
+
+        #try:
+        #    return self.api.get_hardware_source_by_id("superscan",version="1")
         # return self.api.get_hardware_source_by_id("nion1010",version="1")
-        return self.api.get_hardware_source_by_id('usim_scan_device', '1.0')
+        #except:
+        #    pass
+
+        if camera is None:
+            return self.api.get_hardware_source_by_id('usim_scan_device', '1.0')
 
     def update_parameters(self):
         self.scale_detection_module.fetch_parameters()
@@ -153,6 +161,9 @@ class StructureRecognitionPanelDelegate:
                     visualization = self.visualization_module.add_points(visualization, points)
 
                     data_ref.data = visualization
+
+            camera = self.get_camera()
+            print(camera)
 
             self.thread = threading.Thread(target=thread_this,
                                            args=(self.stop_live_analysis_event, self.get_camera(), data_ref))
