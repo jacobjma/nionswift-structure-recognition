@@ -161,8 +161,10 @@ class StructureRecognitionPanelDelegate:
                                                                                 model.last_segmentation
                                                                                 )
                     visualization = self.visualization_module.add_points(visualization, points)
-
-                    data_ref.data = visualization
+                    
+                    def update_data_item():
+                        data_ref.data = visualization
+                    self.api.queue_task(update_data_item)
 
             camera = self.get_camera()
 
