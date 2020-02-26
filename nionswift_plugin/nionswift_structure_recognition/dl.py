@@ -35,10 +35,10 @@ class DeepLearningModule(StructureRecognitionModule):
 
     def set_preset(self, name):
         # self.model_line_edit.text = presets[name]['model_file']
-        self.mask_weights_line_edit.text = presets[name]['mask_model']['weights']
-        self.density_weights_line_edit.text = presets[name]['density_model']['weights']
-        self.training_sampling_line_edit.text = presets[name]['training_sampling']
-        self.margin_line_edit.text = presets[name]['margin']
+        self.mask_weights_line_edit.text = presets[name]['deep_learning']['mask_model']
+        self.density_weights_line_edit.text = presets[name]['deep_learning']['density_model']
+        self.training_sampling_line_edit.text = presets[name]['deep_learning']['training_sampling']
+        self.margin_line_edit.text = presets[name]['deep_learning']['margin']
         self.nms_distance_line_edit.text = presets[name]['nms']['distance']
         self.nms_threshold_line_edit.text = presets[name]['nms']['threshold']
 

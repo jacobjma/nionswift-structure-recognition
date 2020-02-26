@@ -154,7 +154,7 @@ class StructureRecognitionPanelDelegate:
                     orig_images = source_data[0].data.copy()
                     # orig_shape = orig_images.shape[-2:]
 
-                    points = model.predict(orig_images)
+                    points = model.predict(orig_images)['points'][0]
 
                     visualization = self.visualization_module.create_background(orig_images,
                                                                                 model.last_density,
@@ -165,7 +165,6 @@ class StructureRecognitionPanelDelegate:
                     data_ref.data = visualization
 
             camera = self.get_camera()
-            print(camera)
 
             self.thread = threading.Thread(target=thread_this,
                                            args=(self.stop_live_analysis_event, self.get_camera(), data_ref))

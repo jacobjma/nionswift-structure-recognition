@@ -1,1 +1,1 @@
-recursive-include nionswift_plugin *.py *.pt
+recursive-include nionswift_plugin *.py *.pt *.json

@@ -9,27 +9,23 @@ import torch.nn.functional as F
 from scipy.ndimage import zoom
 
 from .unet import UNet
+import json
+import pathlib
+import os
 
-presets = {'graphene': {'training_sampling': 0.05859375,
-                        'margin': 2.,
-                        'mask_model': {'in_channels': 1,
-                                       'out_channels': 3,
-                                       'init_features': 32,
-                                       'weights': 'graphene_mask.pt',
-                                       'activation': nn.Softmax(1)},
-                        'density_model': {'in_channels': 1,
-                                          'out_channels': 1,
-                                          'init_features': 32,
-                                          'weights': 'graphene_density.pt',
-                                          'activation': nn.Sigmoid()},
-                        'scale': {'crystal_system': 'hexagonal',
-                                  'lattice_constant': 2.46,
-                                  'min_sampling': .015
-                                  },
-                        'nms': {'distance': 1.2,
-                                'threshold': 0.5}
 
-                        }}
+def load_presets():
+    presets_dir = os.path.join(pathlib.Path(__file__).parent.absolute(), 'presets')
+
+    presets = {}
+    for file in os.listdir(presets_dir):
+        with open(os.path.join(presets_dir, file)) as f:
+            new_preset = json.load(f)
+            presets[new_preset['name']] = new_preset
+    return presets
+
+
+presets = load_presets()
 
 
 def sub2ind(rows, cols, array_shape):
@@ -316,23 +312,35 @@ def find_hexagonal_sampling(image, a, min_sampling, bins_per_spot=16):
     return (r * a / float(N) * np.sqrt(3.) / 2.).item()
 
 
-def build_unet_model(parameters):
+def build_unet_model(weights_file):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-    model = UNet(in_channels=parameters['in_channels'],
-                 out_channels=parameters['out_channels'],
-                 init_features=parameters['init_features'],
+    weights_file = os.path.join(os.path.join(os.path.dirname(__file__), 'models'), weights_file)
+    weights = torch.load(weights_file, map_location=device)
+
+    weights_list = list(weights.values())
+
+    init_features = weights_list[0].shape[0]
+    in_channels = weights_list[0].shape[1]
+    out_channels = len(weights_list[-1])
+
+    model = UNet(in_channels=in_channels,
+                 out_channels=out_channels,
+                 init_features=init_features,
                  dropout=0.)
 
-    weights_file = os.path.join(os.path.join(os.path.dirname(__file__), 'models'), parameters['weights'])
-    model.load_state_dict(torch.load(weights_file, map_location=device))
+    model.load_state_dict(weights)
     model.to(device)
-    return lambda x: parameters['activation'](model(x))
+
+    if out_channels == 1:
+        return lambda x: nn.Sigmoid()(model(x))
+    else:
+        return lambda x: nn.Softmax(1)(model(x))
 
 
 def build_model_from_dict(parameters):
-    mask_model = build_unet_model(parameters=parameters['mask_model'])
-    density_model = build_unet_model(parameters=parameters['density_model'])
+    mask_model = build_unet_model(parameters['deep_learning']['mask_model'])
+    density_model = build_unet_model(parameters['deep_learning']['density_model'])
 
     if parameters['scale']['crystal_system'] == 'hexagonal':
         scale_model = lambda x: find_hexagonal_sampling(x, a=parameters['scale']['lattice_constant'],
@@ -343,30 +351,65 @@ def build_model_from_dict(parameters):
     def preprocess(images):
         pass
 
-    def discretization_model(density):
-        nms_distance_pixels = int(np.round(parameters['nms']['distance'] / parameters['training_sampling']))
+    def discretization_model(density, classes):
+        nms_distance_pixels = int(
+            np.round(parameters['nms']['distance'] / parameters['deep_learning']['training_sampling']))
 
-        accepted = non_maximum_suppresion(density, distance=nms_distance_pixels,
-                                          threshold=parameters['nms']['threshold'])
+        accepted, probabilities = non_maximum_suppresion(density, distance=nms_distance_pixels,
+                                                         threshold=parameters['nms']['threshold'], classes=classes)
 
-        points = np.array(np.where(accepted[0])).T
-        # probabilities = probabilities[0, :, points[:, 0], points[:, 1]]
-        return points
+        points = [np.array(np.where(accepted[i])).T for i in range(accepted.shape[0])]
+        probabilities = [probabilities[0, :, p[:, 0], p[:, 1]] for p in points]
+        return points, probabilities
 
-    model = AtomRecognitionModel(mask_model, density_model, training_sampling=parameters['training_sampling'],
+    model = AtomRecognitionModel(mask_model, density_model,
+                                 training_sampling=parameters['deep_learning']['training_sampling'],
+                                 margin=parameters['deep_learning']['training_sampling'],
                                  scale_model=scale_model, discretization_model=discretization_model)
 
     return model
 
 
+class BatchGenerator:
+
+    def __init__(self, n_items, max_batch_size):
+        self._n_items = n_items
+        self._n_batches = (n_items + (-n_items % max_batch_size)) // max_batch_size
+        self._batch_size = (n_items + (-n_items % self.n_batches)) // self.n_batches
+
+    @property
+    def n_batches(self):
+        return self._n_batches
+
+    @property
+    def batch_size(self):
+        return self._batch_size
+
+    @property
+    def n_items(self):
+        return self._n_items
+
+    def generate(self):
+        batch_start = 0
+        for i in range(self.n_batches):
+            batch_end = batch_start + self.batch_size
+            if i == self.n_batches - 1:
+                yield batch_start, self.n_items - batch_end + self.batch_size
+            else:
+                yield batch_start, self.batch_size
+
+            batch_start = batch_end
+
+
 class AtomRecognitionModel:
 
-    def __init__(self, mask_model, density_model, training_sampling, scale_model, discretization_model):
+    def __init__(self, mask_model, density_model, training_sampling, margin, scale_model, discretization_model):
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         # self.preprocessing = preprocessing
         self.mask_model = mask_model
         self.density_model = density_model
         self.training_sampling = training_sampling
+        self.margin = margin
         self.scale_model = scale_model
         self.discretization_model = discretization_model
         self.last_density = None
@@ -376,7 +419,7 @@ class AtomRecognitionModel:
         if len(images.shape) == 2:
             images = images.unsqueeze(0).unsqueeze(0)
         elif len(images.shape) == 3:
-            images = torch.unsqueeze(images, 0)
+            images = torch.unsqueeze(images, 1)
         elif len(images.shape) != 4:
             raise RuntimeError('')
         return images
@@ -404,6 +447,20 @@ class AtomRecognitionModel:
         points = points * self.training_sampling / sampling
         return points - np.array([padding[0] // 2, padding[1] // 2])
 
+    def predict_batches(self, images, max_batch=4):
+        images = torch.tensor(images).to(self.device)
+        images = self.standardize_dims(images)
+        batch_generator = BatchGenerator(len(images), max_batch)
+
+        output = {'points': [], 'probabilities': []}
+        for i, (start, size) in enumerate(batch_generator.generate()):
+            print('Mini batch: {} of {}'.format(i, batch_generator.n_batches))
+            new_output = self.predict(images[start:start + size])
+            output['points'] += new_output['points']
+            output['probabilities'] += new_output['probabilities']
+
+        return output
+
     def predict(self, images):
         images = torch.tensor(images).to(self.device)
         images = self.standardize_dims(images)
@@ -413,7 +470,6 @@ class AtomRecognitionModel:
         images = self.normalize_images(images)
         images = pad_to_size(images, images.shape[2], images.shape[3], n=16)
         segmentation = self.mask_model(images)
-
         mask = torch.sum(segmentation[:, :-1], dim=1)[:, None]
 
         images = self.normalize_images(images, mask)
@@ -421,12 +477,12 @@ class AtomRecognitionModel:
         density = self.density_model(images)
         density = mask * density
         density = density.detach().cpu().numpy()
-        segmentation = segmentation.detach().cpu().numpy()
 
-        self.last_density = self.postprocess_images(density[0, 0], orig_shape, sampling)
-        self.last_segmentation = self.postprocess_images(segmentation[0, 0], orig_shape, sampling)
+        classes = segmentation[:, :-1].detach().cpu().numpy()
 
-        points = self.discretization_model(density)
-        points = self.postprocess_points(points, density.shape[-2:], orig_shape, sampling)
+        points, probabilities = self.discretization_model(density, classes)
+        points = [self.postprocess_points(p, density.shape[-2:], orig_shape, sampling)[:, ::-1] for p in points]
         # points = [self.postprocess_points(p, density.shape[-2:], orig_shape, sampling) for p in points]
-        return points[:, ::-1]
+
+        output = {'points': points, 'probabilities': probabilities}
+        return output
