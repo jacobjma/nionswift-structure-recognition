@@ -99,6 +99,8 @@ class StructureRecognitionPanelDelegate:
 
         if camera is None:
             return self.api.get_hardware_source_by_id('usim_scan_device', '1.0')
+        else:
+            return camera
 
     def update_parameters(self):
         self.scale_detection_module.fetch_parameters()
