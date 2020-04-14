@@ -484,5 +484,5 @@ class AtomRecognitionModel:
         points = [self.postprocess_points(p, density.shape[-2:], orig_shape, sampling)[:, ::-1] for p in points]
         # points = [self.postprocess_points(p, density.shape[-2:], orig_shape, sampling) for p in points]
 
-        output = {'points': points, 'probabilities': probabilities}
+        output = {'points': points, 'probabilities': probabilities, 'sampling': sampling}
         return output
