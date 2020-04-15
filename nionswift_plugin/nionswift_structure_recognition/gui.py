@@ -2,8 +2,6 @@ import gettext
 import threading
 
 import numpy as np
-import torch
-import torch.nn as nn
 
 from .dl import DeepLearningModule
 # from .graph import GraphModule
@@ -140,7 +138,6 @@ class StructureRecognitionPanelDelegate:
 
         model = self.deep_learning_module.model
 
-
         print('start processing')
         with self.api.library.data_ref_for_data_item(self.output_data_item) as data_ref:
 
@@ -152,7 +149,6 @@ class StructureRecognitionPanelDelegate:
                     source_data = camera.grab_next_to_finish()  # TODO: This starts scanning? Must be a bug.
 
                     orig_images = source_data[0].data.copy()
-                    # orig_shape = orig_images.shape[-2:]
 
                     points = model.predict(orig_images)['points'][0]
 
@@ -165,8 +161,6 @@ class StructureRecognitionPanelDelegate:
                     def update_data_item():
                         data_ref.data = visualization
                     self.api.queue_task(update_data_item)
-
-            camera = self.get_camera()
 
             self.thread = threading.Thread(target=thread_this,
                                            args=(self.stop_live_analysis_event, self.get_camera(), data_ref))
