@@ -1,0 +1,25 @@
+{
+  "backbone": {
+    "weights_file": "graphene-backbone.pt",
+    "in_channels": 1,
+    "features": 8
+  },
+  "density_head": {
+    "weights_file": "graphene-density.pt"
+  },
+  "segmentation_head": {
+    "weights_file": "graphene-segmentation.pt",
+    "num_classes": 3
+  },
+  "training_sampling": 0.05,
+  "density_sigma": 6,
+  "threshold": 70,
+  "enhancement_filter": {
+    "alpha": 2,
+    "sigmas": [
+      6,
+      12
+    ],
+    "iterations": 20
+  }
+}

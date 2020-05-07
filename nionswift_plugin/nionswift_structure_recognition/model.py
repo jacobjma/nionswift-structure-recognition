@@ -3,306 +3,352 @@ import os
 import pathlib
 
 import numpy as np
+import skimage.measure
+import skimage.util
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.ndimage import zoom
+from scipy.spatial.distance import pdist
 
-from .scale import find_hexagonal_sampling
-from .unet import UNet
-
-
-def load_presets():
-    presets_dir = os.path.join(pathlib.Path(__file__).parent.absolute(), 'presets')
-
-    presets = {}
-    for file in os.listdir(presets_dir):
-        with open(os.path.join(presets_dir, file)) as f:
-            new_preset = json.load(f)
-            presets[new_preset['name']] = new_preset
-    return presets
+from .unet import R2UNet, ConvHead
 
 
-presets = load_presets()
-
-
-def sub2ind(rows, cols, array_shape):
-    return rows * array_shape[1] + cols
-
-
-def ind2sub(array_shape, ind):
-    rows = (np.int32(ind) // array_shape[1])
-    cols = (np.int32(ind) % array_shape[1])
-    return (rows, cols)
+def label_to_index_generator(labels, first_label=0):
+    labels = labels.flatten()
+    labels_order = labels.argsort()
+    sorted_labels = labels[labels_order]
+    indices = np.arange(0, len(labels) + 1)[labels_order]
+    index = np.arange(first_label, np.max(labels) + 1)
+    lo = np.searchsorted(sorted_labels, index, side='left')
+    hi = np.searchsorted(sorted_labels, index, side='right')
+    for i, (l, h) in enumerate(zip(lo, hi)):
+        yield np.sort(indices[l:h])
 
 
 def closest_multiple_ceil(n, m):
     return int(np.ceil(n / m) * m)
 
 
-def pad_to_size(images, height, width, n=None):
+def pad_to_size(images, height, width, n=16):
+    shape = images.shape[-2:]
+
     if n is not None:
         height = closest_multiple_ceil(height, n)
         width = closest_multiple_ceil(width, n)
 
-    shape = images.shape[-2:]
+    up = max((height - shape[0]) // 2, 0)
+    down = max(height - shape[0] - up, 0)
+    left = max((width - shape[1]) // 2, 0)
+    right = max(width - shape[1] - left, 0)
 
-    up = (height - shape[0]) // 2
-    down = height - shape[0] - up
-    left = (width - shape[1]) // 2
-    right = width - shape[1] - left
-    images = F.pad(images, pad=[up, down, left, right])
-    return images
+    padding = [up, down, left, right]
 
-
-def normalize_global(images):
-    return (images - torch.mean(images, dim=(-2, -1), keepdim=True)) / torch.std(images, dim=(-2, -1), keepdim=True)
+    return F.pad(images, padding, mode='reflect'), padding
 
 
-def weighted_normalization(images, mask=None):
+def weighted_normalization(image, mask=None):
     if mask is None:
-        return normalize_global(images)
+        return (image - torch.mean(image)) / torch.std(image)
 
-    weighted_means = torch.sum(images * mask, dim=(-1, -2), keepdim=True) / torch.sum(mask, dim=(-1, -2), keepdim=True)
+    weighted_means = (torch.sum(image * mask, dim=(1, 2, 3), keepdims=True) /
+                      torch.sum(mask, dim=(1, 2, 3), keepdims=True))
     weighted_stds = torch.sqrt(
-        torch.sum(mask * (images - weighted_means) ** 2, dim=(-1, -2), keepdim=True) /
-        torch.sum(mask, dim=(-1, -2), keepdim=True))
-    return (images - weighted_means) / weighted_stds
+        torch.sum(mask * (image - weighted_means) ** 2, dim=(1, 2, 3), keepdims=True) /
+        torch.sum(mask ** 2, dim=(1, 2, 3), keepdims=True))
+    return (image - weighted_means) / weighted_stds
 
 
-def non_maximum_suppresion(density, distance, threshold, classes=None):
-    shape = density.shape[2:]
+def mask_outside_points(points, shape, margin=0):
+    mask = ((points[:, 0] >= margin) & (points[:, 1] >= margin) &
+            (points[:, 0] < shape[0] - margin) & (points[:, 1] < shape[1] - margin))
+    return mask
 
-    density = density.reshape((density.shape[0], -1))
 
-    if classes is not None:
-        classes = classes.reshape(classes.shape[:2] + (-1,))
-        probabilities = np.zeros(classes.shape, dtype=classes.dtype)
+def merge_close_points(points, distance):
+    if len(points) < 2:
+        return points, np.arange(len(points))
 
-    accepted = np.zeros(density.shape, dtype=np.bool_)
-    suppressed = np.zeros(density.shape, dtype=np.bool_)
+    clusters = fcluster(linkage(pdist(points), method='complete'), distance, criterion='distance')
+    new_points = np.zeros_like(points)
+    indices = np.zeros(len(points), dtype=np.int)
+    k = 0
+    for i, cluster in enumerate(label_to_index_generator(clusters, 1)):
+        new_points[i] = np.mean(points[cluster], axis=0)
+        indices[i] = np.min(indices)
+        k += 1
+    return new_points[:k], indices[:k]
 
-    x_disc = np.zeros((2 * distance + 1, 2 * distance + 1), dtype=np.int32)
 
-    x_disc[:] = np.linspace(0, 2 * distance, 2 * distance + 1)
-    y_disc = x_disc.copy().T
-    x_disc -= distance
-    y_disc -= distance
-    x_disc = x_disc.ravel()
-    y_disc = y_disc.ravel()
+def markers_to_points(markers, threshold=.5, merge_distance=0.1):
+    points = np.array(np.where(markers > threshold)).T
+    if len(points) > 1:
+        points, _ = merge_close_points(points, merge_distance)
+    return points
 
-    r2 = x_disc ** 2 + y_disc ** 2
 
-    x_disc = x_disc[r2 < distance ** 2]
-    y_disc = y_disc[r2 < distance ** 2]
+def index_array_with_points(points, array, outside_value=0):
+    values = np.full(len(points), outside_value, dtype=array.dtype)
+    rounded = np.round(points).astype(np.int)
+    inside = mask_outside_points(rounded, array.shape)
+    inside_points = rounded[inside]
+    values[inside] = array[inside_points[:, 0], inside_points[:, 1]]
+    return values
 
-    weights = np.exp(-r2 / (2 * (distance / 3) ** 2))
-    weights = np.reshape(weights[r2 < distance ** 2], (-1, 1))
 
-    for i in range(density.shape[0]):
-        suppressed[i][density[i] < threshold] = True
-        for j in np.argsort(-density[i].ravel()):
-            if not suppressed[i, j]:
-                accepted[i, j] = True
+def disc_indices(radius):
+    X = np.zeros((2 * radius + 1, 2 * radius + 1), dtype=np.int32)
+    x = np.linspace(0, 2 * radius, 2 * radius + 1)
+    X[:] = np.linspace(0, 2 * radius, 2 * radius + 1)
+    X -= radius
 
-                x, y = ind2sub(shape, j)
-                neighbors_x = x + x_disc
-                neighbors_y = y + y_disc
+    Y = X.copy().T.ravel()
+    X = X.ravel()
 
-                valid = ((neighbors_x > -1) & (neighbors_y > -1) & (neighbors_x < shape[0]) & (
-                        neighbors_y < shape[1]))
+    x = x - radius
+    r2 = (x[:, None] ** 2 + x[None] ** 2).ravel()
+    return X[r2 < radius ** 2], Y[r2 < radius ** 2], r2[r2 < radius ** 2]
 
-                neighbors_x = neighbors_x[valid]
-                neighbors_y = neighbors_y[valid]
 
-                k = sub2ind(neighbors_x, neighbors_y, shape)
-                suppressed[i][k] = True
+def integrate_discs(points, array, radius):
+    points = np.round(points).astype(np.int)
+    X, Y, r2 = disc_indices(radius)
+    weights = np.exp(-r2 / (2 * (radius / 3) ** 2))
 
-                if classes is not None:
-                    tmp = np.sum(classes[i, :, k] * weights[valid], axis=0)
-                    probabilities[i, :, j] = tmp / np.sum(tmp)
+    probabilities = np.zeros((len(points), 3))
+    for i, point in enumerate(points):
+        X_ = point[0] + X
+        Y_ = point[1] + Y
+        inside = ((X_ > 0) & (X_ < array.shape[1]) & (Y_ > 0) & (Y_ < array.shape[2]))
 
-    accepted = accepted.reshape((density.shape[0],) + shape)
+        X_ = X_[inside]
+        Y_ = Y_[inside]
+        probabilities[i] = np.sum(array[:, X_, Y_] * weights[None, inside], axis=1)
 
-    if classes is not None:
-        probabilities = probabilities.reshape(classes.shape[:2] + shape)
-        return accepted, probabilities
+    return probabilities
+
+
+def merge_dopants_into_contamination(segmentation):
+    binary = segmentation != 0
+    labels, n = skimage.measure.label(binary, return_num=True)
+
+    new_segmentation = np.zeros_like(segmentation)
+    for label in range(1, n + 1):
+        in_segment = labels == label
+        if np.sum(segmentation[in_segment] == 1) > np.sum(segmentation[in_segment] == 2):
+            new_segmentation[in_segment] = 1
+        else:
+            new_segmentation[in_segment] = 2
+
+    return new_segmentation
+
+
+def load_preset_model(preset):
+    models_dir = os.path.join(pathlib.Path(__file__).parent.absolute(), 'models')
+
+    if preset == 'graphene':
+        model = AtomRecognitionModel.load(os.path.join(models_dir, 'graphene.json'))
+        device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+        model = model.to(device)
+        return model
 
     else:
-        return accepted
+        raise RuntimeError()
 
 
-def build_unet_model(weights_file):
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+class SeparableFilter(nn.Module):
 
-    weights_file = os.path.join(os.path.join(os.path.dirname(__file__), 'models'), weights_file)
-    weights = torch.load(weights_file, map_location=device)
+    def __init__(self, kernel):
+        super().__init__()
+        self.register_buffer('kernel', kernel)
 
-    weights_list = list(weights.values())
-
-    init_features = weights_list[0].shape[0]
-    in_channels = weights_list[0].shape[1]
-    out_channels = len(weights_list[-1])
-
-    model = UNet(in_channels=in_channels,
-                 out_channels=out_channels,
-                 init_features=init_features,
-                 dropout=0.)
-
-    model.load_state_dict(weights)
-    model.to(device)
-
-    if out_channels == 1:
-        return lambda x: nn.Sigmoid()(model(x))
-    else:
-        return lambda x: nn.Softmax(1)(model(x))
+    def forward(self, x):
+        x = F.pad(x, list((len(self.kernel) // 2,) * 4))
+        return F.conv2d(F.conv2d(x, self.kernel.reshape((1, 1, 1, -1))), self.kernel.reshape((1, 1, -1, 1)))
 
 
-def build_model_from_dict(parameters):
-    mask_model = build_unet_model(parameters['deep_learning']['mask_model'])
-    density_model = build_unet_model(parameters['deep_learning']['density_model'])
-
-    if parameters['scale']['crystal_system'] == 'hexagonal':
-        scale_model = lambda x: find_hexagonal_sampling(x, lattice_constant=parameters['scale']['lattice_constant'],
-                                                        min_sampling=parameters['scale']['min_sampling'])
-    else:
-        raise NotImplementedError('')
-
-    def preprocess(images):
-        pass
-
-    def discretization_model(density, classes):
-        nms_distance_pixels = int(
-            np.round(parameters['nms']['distance'] / parameters['deep_learning']['training_sampling']))
-
-        accepted, probabilities = non_maximum_suppresion(density, distance=nms_distance_pixels,
-                                                         threshold=parameters['nms']['threshold'], classes=classes)
-
-        points = [np.array(np.where(accepted[i])).T for i in range(accepted.shape[0])]
-        probabilities = [probabilities[0, :, p[:, 0], p[:, 1]] for p in points]
-        return points, probabilities
-
-    model = AtomRecognitionModel(mask_model, density_model,
-                                 training_sampling=parameters['deep_learning']['training_sampling'],
-                                 margin=parameters['deep_learning']['training_sampling'],
-                                 scale_model=scale_model, discretization_model=discretization_model)
-
-    return model
+class GaussianFilter2d(SeparableFilter):
+    def __init__(self, sigma):
+        kernel_size = int(np.ceil(sigma) ** 2) * 2 + 1
+        A = 1 / (sigma * np.sqrt(2 * np.pi))
+        kernel = A * torch.exp(-(torch.arange(kernel_size) - (kernel_size - 1) / 2) ** 2 / (2 * sigma ** 2))
+        super().__init__(kernel)
 
 
-class BatchGenerator:
+class SumFilter2d(SeparableFilter):
+    def __init__(self, kernel_size):
+        kernel = torch.ones(kernel_size)
+        super().__init__(kernel)
 
-    def __init__(self, n_items, max_batch_size):
-        self._n_items = n_items
-        self._n_batches = (n_items + (-n_items % max_batch_size)) // max_batch_size
-        self._batch_size = (n_items + (-n_items % self.n_batches)) // self.n_batches
 
-    @property
-    def n_batches(self):
-        return self._n_batches
+class PeakEnhancementFilter(nn.Module):
 
-    @property
-    def batch_size(self):
-        return self._batch_size
+    def __init__(self, alpha, sigmas, iterations, epsilon=1e-7):
+        super().__init__()
+        self._filters = nn.ModuleList([GaussianFilter2d(sigma) for sigma in sigmas])
+        self._alpha = alpha
+        self._iterations = iterations
+        self._epsilon = epsilon
 
-    @property
-    def n_items(self):
-        return self._n_items
-
-    def generate(self):
-        batch_start = 0
-        for i in range(self.n_batches):
-            batch_end = batch_start + self.batch_size
-            if i == self.n_batches - 1:
-                yield batch_start, self.n_items - batch_end + self.batch_size
-            else:
-                yield batch_start, self.batch_size
-
-            batch_start = batch_end
+    def forward(self, tensor):
+        temp = tensor.clone()
+        for i in range(self._iterations):
+            temp = temp ** self._alpha
+            for filt in self._filters:
+                temp = temp * filt(tensor) / (filt(temp) + self._epsilon)
+        return temp
 
 
 class AtomRecognitionModel:
 
-    def __init__(self, mask_model, density_model, training_sampling, margin, scale_model, discretization_model):
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        # self.preprocessing = preprocessing
-        self.mask_model = mask_model
-        self.density_model = density_model
-        self.training_sampling = training_sampling
-        self.margin = margin
-        self.scale_model = scale_model
-        self.discretization_model = discretization_model
-        self.last_density = None
-        self.last_segmentation = None
+    def __init__(self, backbone, density_head, segmentation_head, training_sampling, density_sigma, threshold,
+                 enhancement_filter_kwargs):
+        self._backbone = backbone
+        self._segmentation_head = segmentation_head
+        self._density_head = density_head
+        self._training_sampling = training_sampling
+        self._density_sigma = density_sigma
+        self._threshold = threshold
+        self._enhancement_filter = PeakEnhancementFilter(**enhancement_filter_kwargs)
 
-    def standardize_dims(self, images):
+    def to(self, *args, **kwargs):
+        self._backbone.to(*args, **kwargs)
+        self._segmentation_head.to(*args, **kwargs)
+        self._density_head.to(*args, **kwargs)
+        self._enhancement_filter.to(*args, **kwargs)
+        return self
+
+    @classmethod
+    def load(cls, path):
+
+        with open(path, 'r') as fp:
+            state = json.load(fp)
+
+        folder = os.path.dirname(path)
+
+        backbone = R2UNet(1, 8)
+        density_head = ConvHead(backbone.out_type, 1)
+        segmentation_head = ConvHead(backbone.out_type, 3)
+
+        backbone.load_state_dict(torch.load(os.path.join(folder, state['backbone']['weights_file'])))
+        density_head.load_state_dict(torch.load(os.path.join(folder, state['density_head']['weights_file'])))
+        segmentation_head.load_state_dict(torch.load(os.path.join(folder, state['segmentation_head']['weights_file'])))
+
+        return cls(backbone=backbone,
+                   density_head=density_head,
+                   segmentation_head=segmentation_head,
+                   training_sampling=state['training_sampling'],
+                   density_sigma=state['density_sigma'],
+                   threshold=state['threshold'],
+                   enhancement_filter_kwargs=state['enhancement_filter'])
+
+    @property
+    def training_sampling(self):
+        return self._training_sampling
+
+    def prepare_image(self, image, sampling=None, mask=None):
+        image = image.astype(np.float32)
+
+        if sampling is not None:
+            image = zoom(image, zoom=sampling / self._training_sampling)
+
+        # image = cupy_to_pytorch(image)[None, None]
+        device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+        image = torch.tensor(image)[None, None].to(device)
+
+        image, padding = pad_to_size(image, image.shape[2], image.shape[3], n=16)
+
+        image = weighted_normalization(image, mask)
+
+        return image, sampling, padding
+
+    def __call__(self, image, sampling=None):
+        try:
+            return self.predict(image, sampling=sampling)
+        except RuntimeError as e:
+            if 'out of memory' in str(e):
+                print('WARNING: ran out of memory')
+                torch.cuda.empty_cache()
+
+                return None
+            else:
+                raise e
+
+    def predict_series(self, images, sampling, stop_event=None):
         if len(images.shape) == 2:
-            images = images.unsqueeze(0).unsqueeze(0)
-        elif len(images.shape) == 3:
-            images = torch.unsqueeze(images, 1)
-        elif len(images.shape) != 4:
-            raise RuntimeError('')
-        return images
+            images = images[None]
 
-    def rescale_images(self, images, sampling):
-        scale_factor = sampling / self.training_sampling
-        images = F.interpolate(images, scale_factor=scale_factor, mode='nearest')
+        t = .1
+        output = []
+        for i, image in enumerate(images):
+            if stop_event is not None:
+                if stop_event.is_set():
+                    return None
 
-        return images
+            output.append(self(image, sampling))
 
-    def normalize_images(self, images, mask=None):
-        return weighted_normalization(images, mask)
+            if i / len(images) > t:
+                print('{} of {} frames processed'.format(i, len(images)))
+                t += .1
 
-    def postprocess_images(self, image, original_shape, sampling):
-        image = zoom(image, self.training_sampling / sampling)
-        shape = image.shape
-        padding = (shape[0] - original_shape[0], shape[1] - original_shape[1])
-        image = image[padding[0] // 2: padding[0] // 2 + original_shape[0],
-                padding[1] // 2: padding[1] // 2 + original_shape[1]]
-        return image
-
-    def postprocess_points(self, points, shape, original_shape, sampling):
-        shape = np.round(np.array(shape) * self.training_sampling / sampling)
-        padding = (shape[0] - original_shape[0], shape[1] - original_shape[1])
-        points = points * self.training_sampling / sampling
-        return points - np.array([padding[0] // 2, padding[1] // 2])
-
-    def predict_batches(self, images, max_batch=4):
-        images = torch.tensor(images).to(self.device)
-        images = self.standardize_dims(images)
-        batch_generator = BatchGenerator(len(images), max_batch)
-
-        output = {'points': [], 'probabilities': []}
-        for i, (start, size) in enumerate(batch_generator.generate()):
-            print('Mini batch: {} of {}'.format(i, batch_generator.n_batches))
-            new_output = self.predict(images[start:start + size])
-            output['points'] += new_output['points']
-            output['probabilities'] += new_output['probabilities']
+        print('{} of {} frames processed'.format(i, len(images)))
 
         return output
 
-    def predict(self, images):
-        sampling = self.scale_model(images)
-        images = torch.tensor(images).to(self.device)
-        images = self.standardize_dims(images)
-        orig_shape = images.shape[-2:]
-        images = self.rescale_images(images, sampling)
-        images = self.normalize_images(images)
-        images = pad_to_size(images, images.shape[2], images.shape[3], n=16)
-        segmentation = self.mask_model(images)
-        mask = torch.sum(segmentation[:, :-1], dim=1)[:, None]
+    def predict(self, image, sampling=None):
+        with torch.no_grad():
+            preprocessed, sampling, padding = self.prepare_image(image.copy(), sampling)
 
-        images = self.normalize_images(images, mask)
+            features = self._backbone(preprocessed)
+            segmentation = nn.Softmax(1)(self._segmentation_head(features))
 
-        density = self.density_model(images)
-        density = mask * density
-        density = density.detach().cpu().numpy()
+            mask = (segmentation[0, 0] + segmentation[0, 2])[None, None]
 
-        classes = segmentation[:, :-1].detach().cpu().numpy()
+            preprocessed, sampling, padding = self.prepare_image(image.copy(), sampling, mask)
 
-        points, probabilities = self.discretization_model(density, classes)
-        points = [self.postprocess_points(p, density.shape[-2:], orig_shape, sampling)[:, ::-1] for p in points]
-        # points = [self.postprocess_points(p, density.shape[-2:], orig_shape, sampling) for p in points]
+            features = self._backbone(preprocessed)
 
-        output = {'points': points, 'probabilities': probabilities, 'sampling': sampling}
+            segmentation = nn.Softmax(1)(self._segmentation_head(features))
+            density = nn.Sigmoid()(self._density_head(features))
+
+            markers = self._enhancement_filter(density)
+
+            markers = markers.detach().cpu().numpy()[0, 0]
+            segmentation = segmentation.detach().cpu().numpy()[0]
+
+        torch.cuda.empty_cache()
+
+        points = np.array(np.where(markers > self._threshold)).T
+
+        points, indices = merge_close_points(points, self._density_sigma)
+
+        label_probabilities = integrate_discs(points, segmentation, self._density_sigma)
+        labels = np.argmax(label_probabilities, axis=-1)
+
+        points = points[labels != 1]
+        labels = labels[labels != 1]
+
+        contamination = merge_dopants_into_contamination(np.argmax(segmentation, axis=0)) == 1
+
+        scale_factor = 16
+        contamination = skimage.util.view_as_blocks(contamination, (scale_factor,) * 2).sum((-2, -1)) > (
+                scale_factor ** 2 / 2)
+        contamination = (np.array(np.where(contamination)).T) * 16 + 8
+
+        points = np.vstack((points, contamination))
+        labels = np.concatenate((labels, np.ones(len(contamination), dtype=labels.dtype)))
+
+        points = points.astype(np.float)
+        points = points - padding[0]
+
+        if sampling is not None:
+            points *= self._training_sampling / sampling
+
+        output = {'points': points[:, ::-1],
+                  'labels': labels,
+                  'density': density[0, 0].detach().cpu().numpy(),
+                  'segmentation': segmentation,
+                  'sampling': sampling}
+
         return output

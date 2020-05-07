@@ -8,7 +8,7 @@ setuptools.setup(
     author_email="jacob.madsen@univie.ac.at",
     description="Deep learning structure recognition of atomic resolution images",
     packages=["nionswift_plugin.nionswift_structure_recognition"],
-    package_data={"nionswift_plugin.nionswift_structure_recognition": ["models/*"]},
+    package_data={"nionswift_plugin.nionswift_structure_recognition": ["models/*", "presets/*"]},
     include_package_data=True,
     python_requires='~=3.6',
 )

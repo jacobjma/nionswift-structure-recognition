@@ -1,92 +1,132 @@
-import torch
+import e2cnn.nn as e2nn
 import torch.nn as nn
+from e2cnn import gspaces
 
 
-class DoubleConv(nn.Module):
-    """(convolution => [BN] => ReLU) * 2"""
+class R2DoubleConv(nn.Module):
 
-    def __init__(self, in_channels, out_channels, batch_norm=True):
+    def __init__(self, in_type, out_type, batch_norm=True):
         super().__init__()
 
         layers = []
 
+        layers += [e2nn.R2Conv(in_type, out_type, kernel_size=3, padding=1, bias=not batch_norm)]
         if batch_norm:
-            layers += [nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False)]
-            layers += [nn.BatchNorm2d(out_channels)]
-        else:
-            layers += [nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=True)]
+            layers += [e2nn.InnerBatchNorm(out_type)]
+        layers += [e2nn.ReLU(out_type, inplace=True)]
 
-        layers += [nn.ReLU(inplace=True)]
-
+        layers += [e2nn.R2Conv(out_type, out_type, kernel_size=3, padding=1, bias=not batch_norm)]
         if batch_norm:
-            layers += [nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False)]
-            layers += [nn.BatchNorm2d(out_channels)]
-        else:
-            layers += [nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=True)]
+            layers += [e2nn.InnerBatchNorm(out_type)]
+        layers += [e2nn.ReLU(out_type, inplace=True)]
 
-        layers += [nn.ReLU(inplace=True)]
+        self.double_conv = e2nn.SequentialModule(*layers)
 
-        self.double_conv = nn.Sequential(*layers)
+    @property
+    def out_type(self):
+        return self.double_conv.out_type
 
     def forward(self, x):
         return self.double_conv(x)
 
 
-class Down(nn.Module):
+class R2Down(nn.Module):
 
-    def __init__(self, in_channels, out_channels, dropout):
+    def __init__(self, in_type, out_type):
         super().__init__()
-        self.maxpool_conv = nn.Sequential(
-            nn.MaxPool2d(2),
-            nn.Dropout(p=dropout),
-            DoubleConv(in_channels, out_channels)
-        )
+        self.pool = e2nn.PointwiseMaxPoolAntialiased(in_type, 2)
+        self.conv = R2DoubleConv(self.pool.out_type, out_type)
+
+    @property
+    def out_type(self):
+        return self.conv.out_type
 
     def forward(self, x):
-        return self.maxpool_conv(x)
+        return self.conv(self.pool(x))
 
 
-class Up(nn.Module):
+class R2Up(nn.Module):
 
-    def __init__(self, in_channels, out_channels, bilinear=True, dropout=0.):
+    def __init__(self, in_type, direct_sum_type, out_type):
         super().__init__()
 
-        if bilinear:
-            self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-        else:
-            self.up = nn.ConvTranspose2d(in_channels // 2, in_channels // 2, kernel_size=2, stride=2)
+        self.up = e2nn.R2Upsampling(in_type, scale_factor=2, mode='bilinear', align_corners=True)
+        self.conv = R2DoubleConv(direct_sum_type, out_type, batch_norm=False)
 
-        self.drop = nn.Dropout(p=dropout)
-        self.conv = DoubleConv(in_channels, out_channels, batch_norm=False)
+    @property
+    def out_type(self):
+        return self.conv.out_type
 
     def forward(self, x1, x2):
         x1 = self.up(x1)
-        x = torch.cat([x2, x1], dim=1)
-        x = self.drop(x)
+        x = e2nn.tensor_directsum((x1, x2))
         return self.conv(x)
 
 
-class UNet(nn.Module):
+class ConvHead(nn.Module):
 
-    def __init__(self, in_channels, out_channels, init_features=16, dropout=.5, bilinear=True):
+    def __init__(self, in_type, out_channels):
         super().__init__()
 
-        features = init_features
-        self.out_channels = out_channels
-
-        self.inc = DoubleConv(in_channels, features)
-        self.down1 = Down(features, 2 * features, dropout=dropout)
-        self.down2 = Down(2 * features, 4 * features, dropout=dropout)
-        self.down3 = Down(4 * features, 8 * features, dropout=dropout)
-        self.down4 = Down(8 * features, 8 * features, dropout=dropout)
-        self.up1 = Up(16 * features, 4 * features, bilinear, dropout=dropout)
-        self.up2 = Up(8 * features, 2 * features, bilinear, dropout=dropout)
-        self.up3 = Up(4 * features, features, bilinear, dropout=dropout)
-        self.up4 = Up(2 * features, features, bilinear, dropout=dropout)
-        self.out1 = nn.Conv2d(in_channels=features, out_channels=features // 2, kernel_size=1)
-        self.out2 = nn.Conv2d(in_channels=features // 2, out_channels=out_channels, kernel_size=1)
+        self.conv = R2DoubleConv(in_type, in_type)
+        self.gpool = e2nn.GroupPooling(in_type)
+        self.out = nn.Conv2d(len(in_type), out_channels, kernel_size=1)
 
     def forward(self, x):
+        x = self.conv(x)
+        x = self.gpool(x)
+        x = x.tensor
+        return self.out(x)
+
+
+class R2UNet(nn.Module):
+
+    def __init__(self, in_channels, features):
+        super().__init__()
+
+        self.r2_act = gspaces.Rot2dOnR2(N=8)
+
+        self.in_type = e2nn.FieldType(self.r2_act, in_channels * [self.r2_act.trivial_repr])
+        out_type = e2nn.FieldType(self.r2_act, features * [self.r2_act.regular_repr])
+        self.inc = R2DoubleConv(self.in_type, out_type)
+
+        out_type = e2nn.FieldType(self.r2_act, 2 * features * [self.r2_act.regular_repr])
+        self.down1 = R2Down(self.inc.out_type, out_type)
+
+        out_type = e2nn.FieldType(self.r2_act, 4 * features * [self.r2_act.regular_repr])
+        self.down2 = R2Down(self.down1.out_type, out_type)
+
+        out_type = e2nn.FieldType(self.r2_act, 8 * features * [self.r2_act.regular_repr])
+        self.down3 = R2Down(self.down2.out_type, out_type)
+
+        out_type = e2nn.FieldType(self.r2_act, 8 * features * [self.r2_act.regular_repr])
+        self.down4 = R2Down(self.down3.out_type, out_type)
+
+        out_type = e2nn.FieldType(self.r2_act, 4 * features * [self.r2_act.regular_repr])
+        direct_sum_type = self.down3.out_type + self.down4.out_type
+        self.up1 = R2Up(self.down4.out_type, direct_sum_type, out_type)
+
+        out_type = e2nn.FieldType(self.r2_act, 2 * features * [self.r2_act.regular_repr])
+        direct_sum_type = self.down2.out_type + self.up1.out_type
+        self.up2 = R2Up(self.up1.out_type, direct_sum_type, out_type)
+
+        out_type = e2nn.FieldType(self.r2_act, 1 * features * [self.r2_act.regular_repr])
+        direct_sum_type = self.down1.out_type + self.up2.out_type
+        self.up3 = R2Up(self.down1.out_type, direct_sum_type, out_type)
+
+        out_type = e2nn.FieldType(self.r2_act, 1 * features * [self.r2_act.regular_repr])
+        direct_sum_type = self.inc.out_type + self.up3.out_type
+        self.up4 = R2Up(self.inc.out_type, direct_sum_type, out_type)
+
+        # self.gpool = e2nn.GroupPooling(out_type)
+
+    @property
+    def out_type(self):
+        return self.up4.out_type
+
+    def forward(self, x):
+        x = e2nn.GeometricTensor(x, self.in_type)
+
         x1 = self.inc(x)
         x2 = self.down1(x1)
         x3 = self.down2(x2)
@@ -96,6 +136,7 @@ class UNet(nn.Module):
         x = self.up2(x, x3)
         x = self.up3(x, x2)
         x = self.up4(x, x1)
-        x = self.out1(x)
-        x = self.out2(x)
+        # x = self.gpool(x)
+
+        # x = x.tensor
         return x

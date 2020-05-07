@@ -1,28 +1,7 @@
-import json
-import os
-import pathlib
-
 import numpy as np
 from scipy import ndimage
 from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import pdist
-
-from .utils import StructureRecognitionModule
-from .widgets import Section, line_edit_template, combo_box_template
-
-
-def load_presets():
-    presets_dir = os.path.join(pathlib.Path(__file__).parent.absolute(), 'presets')
-
-    presets = {}
-    for file in os.listdir(presets_dir):
-        with open(os.path.join(presets_dir, file)) as f:
-            new_preset = json.load(f)
-            presets[new_preset['name']] = new_preset
-    return presets
-
-
-presets = load_presets()
 
 
 def periodic_smooth_decomposition(image):
@@ -139,7 +118,7 @@ def normalized_cross_correlation_with_2d_gaussian(image, kernel_size, std):
     return response  # np.float32(mask)
 
 
-def find_hexagonal_spots(image, lattice_constant=None, min_sampling=None, max_sampling=None, bins_per_symmetry=32,
+def find_hexagonal_spots(image, lattice_constant=None, min_sampling=None, max_sampling=None, bins_per_symmetry=16,
                          return_cartesian=False):
     if image.shape[0] != image.shape[1]:
         raise RuntimeError('image is not square')
@@ -213,7 +192,6 @@ def find_hexagonal_spots(image, lattice_constant=None, min_sampling=None, max_sa
 
 
 def find_hexagonal_sampling(image, lattice_constant, min_sampling=None, max_sampling=None):
-
     if len(image.shape) > 2:
         raise RuntimeError()
 
@@ -224,41 +202,3 @@ def find_hexagonal_sampling(image, lattice_constant, min_sampling=None, max_samp
 
     radial, _ = find_hexagonal_spots(image, lattice_constant, min_sampling, max_sampling)
     return (radial * lattice_constant / n * np.sqrt(3) / 2).item()
-
-
-class ScaleDetectionModule(StructureRecognitionModule):
-
-    def __init__(self, ui, document_controller):
-        super().__init__(ui, document_controller)
-
-        self.crystal_system = None
-        self.lattice_constant = None
-
-    def create_widgets(self, column):
-        section = Section(self.ui, 'Scale detection')
-        column.add(section)
-
-        lattice_constant_row, self.lattice_constant_line_edit = line_edit_template(self.ui, 'Lattice constant [Å]')
-        min_sampling_row, self.min_sampling_line_edit = line_edit_template(self.ui, 'Min. sampling [Å / pixel]')
-        crystal_system_row, self.crystal_system_combo_box = combo_box_template(self.ui, 'Crystal system', ['Hexagonal'])
-
-        section.column.add(crystal_system_row)
-        section.column.add(lattice_constant_row)
-        section.column.add(min_sampling_row)
-
-    def set_preset(self, name):
-        self.crystal_system_combo_box.current_item = presets[name]['scale']['crystal_system']
-        self.lattice_constant_line_edit.text = presets[name]['scale']['lattice_constant']
-        self.min_sampling_line_edit.text = presets[name]['scale']['min_sampling']
-
-    def fetch_parameters(self):
-        self.crystal_system = self.crystal_system_combo_box._widget.current_item.lower()
-        self.lattice_constant = float(self.lattice_constant_line_edit._widget.text)
-        self.min_sampling = float(self.min_sampling_line_edit._widget.text)
-
-    def detect_scale(self, data):
-        if self.crystal_system not in ['hexagonal']:
-            raise RuntimeError('structure {} not recognized for scale recognition'.format(self.crystal_system))
-
-        scale = find_hexagonal_sampling(data, lattice_constant=self.lattice_constant, min_sampling=self.min_sampling)
-        return scale
