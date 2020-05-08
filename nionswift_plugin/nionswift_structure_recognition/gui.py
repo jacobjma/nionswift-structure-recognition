@@ -39,8 +39,8 @@ def push_button_template(ui, label, callback=None):
 
 def combo_box_template(ui, label, items, indent=False):
     row = ui.create_row_widget()
-    if indent:
-        row.add_spacing(8)
+    # if indent:
+    #    row.add_spacing(8)
     row.add(ui.create_label_widget(label))
     row.add_spacing(5)
     widget = ui.create_combo_box_widget(items=items)
@@ -118,34 +118,31 @@ class StructureRecognitionModule(object):
         raise NotImplementedError()
 
 
-class ScaleDetectionModule(StructureRecognitionModule):
+class ScaleDetectionSection(Section):
 
-    def __init__(self, ui, document_controller):
-        super().__init__(ui, document_controller)
+    def __init__(self, ui):
+        super().__init__(ui, 'Calibrate')
 
-    def create_widgets(self, column):
-        section = Section(self.ui, 'Scale detection')
-        column.add(section)
-
-        model_row, self.model_combo_box = combo_box_template(self.ui, 'Model',
+    #def create_widgets(self, column):
+        model_row, self.model_combo_box = combo_box_template(self._ui, 'Model',
                                                              ['Fourier-space Hexagonal', 'Real-space Hexagonal'])
-        lattice_constant_row, self.lattice_constant_line_edit = line_edit_template(self.ui, 'Lattice constant [Å]')
-        min_sampling_row, self.min_sampling_line_edit = line_edit_template(self.ui, 'Min. sampling [Å / pixel]')
-        max_sampling_row, self.max_sampling_line_edit = line_edit_template(self.ui, 'Max. sampling [Å / pixel]')
-        #calibrate_every_row, self.calibrate_every_check_box = check_box_template(self.ui, 'Calibrate every frame')
-        #calibrate_every_row, self.calibrate_every_check_box = check_box_template(self.ui, 'Calibrate every frame')
+        lattice_constant_row, self.lattice_constant_line_edit = line_edit_template(self._ui, 'Lattice constant [Å]')
+        min_sampling_row, self.min_sampling_line_edit = line_edit_template(self._ui, 'Min. sampling [Å / pixel]')
+        max_sampling_row, self.max_sampling_line_edit = line_edit_template(self._ui, 'Max. sampling [Å / pixel]')
+        calibrate_every_row, self.calibrate_every_check_box = check_box_template(self._ui, 'Calibrate every frame')
+        calibrate_row, self.calibrate_push_button = push_button_template(self._ui, 'Calibrate current frame')
 
-        section.column.add(model_row)
-        section.column.add(lattice_constant_row)
-        section.column.add(min_sampling_row)
-        section.column.add(max_sampling_row)
-        #section.column.add(calibrate_every_row)
+        self.column.add(model_row)
+        self.column.add(lattice_constant_row)
+        self.column.add(min_sampling_row)
+        self.column.add(max_sampling_row)
+        self.column.add(calibrate_every_row)
+        self.column.add(calibrate_row)
 
-    def set_preset(self, name):
-        self.model_combo_box.current_item = 'Fourier-space Hexagonal'  # presets[name]['scale']['model']
-        self.lattice_constant_line_edit.text = 2.46  # presets[name]['scale']['lattice_constant']
-        self.min_sampling_line_edit.text = .01  # presets[name]['scale']['min_sampling']
-        self.max_sampling_line_edit.text = .1  # presets[name]['scale']['max_sampling']
+        self.model_combo_box.current_item = 'Fourier-space Hexagonal'
+        self.lattice_constant_line_edit.text = 2.46
+        self.min_sampling_line_edit.text = .01
+        self.max_sampling_line_edit.text = .1
 
     def fetch_parameters(self):
         self.model = self.model_combo_box._widget.current_item.lower()
@@ -295,18 +292,13 @@ class StructureRecognitionPanelDelegate:
         scroll_area = ScrollArea(ui._ui)
         scroll_area.content = main_column._widget
 
-        self.scale_detection_module = ScaleDetectionModule(ui, document_controller)
+        self.scale_detection_module = ScaleDetectionSection(ui)
         # # self.graph_module = GraphModule(ui, document_controller)
         self.visualization_module = VisualizationModule(ui, document_controller)
 
-        def preset_combo_box_changed(x):
-            self.scale_detection_module.set_preset(x.lower())
-            # # self.graph_module.set_preset(x.lower())
-            self.visualization_module.set_preset(x.lower())
-
         preset_row, self.preset_combo_box = combo_box_template(self.ui, 'Preset', ['None', 'Graphene'],
                                                                indent=True)
-        self.preset_combo_box.on_current_item_changed = preset_combo_box_changed
+        # self.preset_combo_box.on_current_item_changed = preset_combo_box_changed
         main_column.add(preset_row)
 
         run_row, self.run_push_button = push_button_template(ui, 'Start live analysis')
@@ -328,14 +320,15 @@ class StructureRecognitionPanelDelegate:
         live_analysis_row.add(run_row)
         # live_analysis_row.add(stop_row)
         main_column.add(live_analysis_row)
+        main_column.add(self.scale_detection_module)
 
-        self.scale_detection_module.create_widgets(main_column)
+        #self.scale_detection_module.create_widgets(main_column)
         # self.deep_learning_module.create_widgets(main_column)
         # # self.graph_module.create_widgets(main_column)
         self.visualization_module.create_widgets(main_column)
 
         # self.preset_combo_box.current_item = 'Graphene'
-        self.scale_detection_module.set_preset('graphene')
+        #self.scale_detection_module.set_preset('graphene')
 
         main_column.add_stretch()
 
@@ -370,11 +363,15 @@ class StructureRecognitionPanelDelegate:
         # self.thread.join()
 
     def process_live(self):
-        if self.model is None:
-            self.model = load_preset_model('graphene')
+        #def thread_this():
+        #t = threading.Thread(target=thread_this)
+        #t.start()
+        #t.join()
+        #if self.model is None:
+        #    self.model = load_preset_model('graphene')
 
         self.output_data_item = self.document_controller.library.create_data_item()
-        self.output_data_item.title = 'Visualization'
+        self.output_data_item.title = 'Visualization of Live Analysis'
 
         # if self.output_data_item is None:
         #     descriptor = self.api.create_data_descriptor(is_sequence=False, collection_dimension_count=0,
@@ -386,10 +383,12 @@ class StructureRecognitionPanelDelegate:
 
         self.update_parameters()
 
-        print('start processing')
+        print('starting live analysis')
         with self.api.library.data_ref_for_data_item(self.output_data_item) as data_ref:
 
             def thread_this(stop_live_analysis_event, camera, data_ref):
+                self.model = load_preset_model('graphene')
+
                 while not stop_live_analysis_event.is_set():
                     if not camera.is_playing:
                         self.stop_live_analysis()

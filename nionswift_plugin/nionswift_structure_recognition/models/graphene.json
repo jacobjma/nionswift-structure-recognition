@@ -15,11 +15,11 @@
   "density_sigma": 6,
   "threshold": 70,
   "enhancement_filter": {
-    "alpha": 2.5,
+    "alpha": 3,
     "sigmas": [
       6,
       12
     ],
-    "iterations": 20
+    "iterations": 10
   }
 }

@@ -38,9 +38,10 @@ def test_data_1():
         data = create_data(40, 512, 2)
         np.savez(path, **data)
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    data['image'] = torch.tensor(data['image']).to(device)
-    data['density'] = torch.tensor(data['density']).to(device)
+    #device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    #data['image'] = torch.tensor(data['image']).to(device)
+    #data['image'] = torch.tensor(data['image']
+    #data['density'] = torch.tensor(data['density']).to(device)
     return data
 
 #

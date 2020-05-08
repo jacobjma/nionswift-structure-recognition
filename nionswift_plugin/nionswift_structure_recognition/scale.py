@@ -46,26 +46,24 @@ def periodic_smooth_decomposed_fft(image):
     return np.fft.fft2(p)
 
 
-def image_as_polar_representation(image, inner=1, outer=None, symmetry=1, bins_per_symmetry=32):
+def image_as_polar_representation(image, inner=1, outer=None, symmetry=2, bins_per_symmetry=32, offset=0):
     center = np.array(image.shape[-2:]) // 2
 
     if outer is None:
         outer = (np.min(center) // 2).item()
 
-    n_radial = outer - inner
+    n_radial = int(np.ceil(outer - inner))
     n_angular = (symmetry // 2) * bins_per_symmetry
 
     radials = np.linspace(inner, outer, n_radial)
-    angles = np.linspace(0, np.pi, n_angular)
+    angles = np.linspace(offset, np.pi + offset, n_angular)
 
     polar_coordinates = center[:, None, None] + radials[None, :, None] * np.array([np.cos(angles), np.sin(angles)])[:,
                                                                          None]
     polar_coordinates = polar_coordinates.reshape((2, -1))
     unrolled = ndimage.map_coordinates(image, polar_coordinates, order=1)
     unrolled = unrolled.reshape((n_radial, n_angular))
-
-    if symmetry > 1:
-        unrolled = unrolled.reshape((unrolled.shape[0], symmetry // 2, -1)).sum(1)
+    unrolled = unrolled.reshape((unrolled.shape[0], symmetry // 2, -1)).sum(1)
 
     return unrolled
 
@@ -118,7 +116,7 @@ def normalized_cross_correlation_with_2d_gaussian(image, kernel_size, std):
     return response  # np.float32(mask)
 
 
-def find_hexagonal_spots(image, lattice_constant=None, min_sampling=None, max_sampling=None, bins_per_symmetry=16,
+def find_hexagonal_spots(image, lattice_constant=None, min_sampling=0, max_sampling=None, bins_per_symmetry=16,
                          return_cartesian=False):
     if image.shape[0] != image.shape[1]:
         raise RuntimeError('image is not square')
@@ -132,7 +130,7 @@ def find_hexagonal_spots(image, lattice_constant=None, min_sampling=None, max_sa
     if min_sampling is None:
         inner = 1
     else:
-        inner = int(np.ceil(max(1, k * min_sampling)))
+        inner = max(1, k * min_sampling)
 
     if max_sampling is None:
         outer = None
