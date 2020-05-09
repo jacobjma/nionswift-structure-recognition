@@ -43,7 +43,7 @@ def pad_to_size(images, height, width, n=16):
     left = max((width - shape[1]) // 2, 0)
     right = max(width - shape[1] - left, 0)
 
-    padding = [up, down, left, right]
+    padding = [left, right, up, down]
 
     return F.pad(images, padding, mode='reflect'), padding
 
@@ -257,11 +257,11 @@ class AtomRecognitionModel:
         # image = cupy_to_pytorch(image)[None, None]
         device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         image = torch.tensor(image)[None, None].to(device)
-
+        
         image, padding = pad_to_size(image, image.shape[2], image.shape[3], n=16)
 
         image = weighted_normalization(image, mask)
-
+        
         return image, sampling, padding
 
     def __call__(self, image, sampling=None):
