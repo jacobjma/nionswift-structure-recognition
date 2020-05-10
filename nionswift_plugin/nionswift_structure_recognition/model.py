@@ -290,10 +290,10 @@ class AtomRecognitionModel:
             output.append(self(image, sampling))
 
             if i / len(images) > t:
-                print('{} of {} frames processed'.format(i, len(images)))
+                print('{} of {} frames processed'.format(i+1, len(images)))
                 t += .1
 
-        print('{} of {} frames processed'.format(i, len(images)))
+        print('{} of {} frames processed'.format(i+1, len(images)))
 
         return output
 
