@@ -326,6 +326,7 @@ class StructureRecognitionPanelDelegate:
             max_sampling = float(self.scale_section.max_sampling_line_edit.text)
             self._calibrator = FourierSpaceCalibrator(crystal_system, lattice_constant, min_sampling, max_sampling)
 
+        self.visualization_module.fetch_parameters()
         # self._calibrator =
         # self.model = self.scale_section.model_combo_box._widget.current_item.lower()
         # self.lattice_constant = float(self.lattice_constant_line_edit._widget.text)
@@ -390,21 +391,20 @@ class StructureRecognitionPanelDelegate:
                     image = source_data[0].data.copy()
 
                     sampling = self._calibrator(image)
-                    print(sampling)
-                    # output = self.model(image, sampling)
+                    output = self.model(image, sampling)
 
-                    # if output is not None:
-                    #     visualization = self.visualization_module.create_background(image,
-                    #                                                                 output['density'],
-                    #                                                                 output['segmentation']
-                    #                                                                 )
-                    #
-                    #     visualization = self.visualization_module.add_points(visualization, output['points'])
-                    #
-                    #     def update_data_item():
-                    #         data_ref.data = visualization
-                    #
-                    #     self.api.queue_task(update_data_item)
+                    if output is not None:
+                        visualization = self.visualization_module.create_background(image,
+                                                                                    output['density'],
+                                                                                    output['segmentation']
+                                                                                    )
+
+                        visualization = self.visualization_module.add_points(visualization, output['points'])
+
+                        def update_data_item():
+                            data_ref.data = visualization
+
+                        self.api.queue_task(update_data_item)
 
             self.thread = threading.Thread(target=thread_this,
                                            args=(self.stop_live_analysis_event, self.get_camera(), data_ref))
