@@ -66,6 +66,10 @@ def detect_scale_fourier_space(image, template, symmetry, min_scale=None, max_sc
     f = np.log(np.abs(np.fft.fftshift(f)))
     f = gaussian_filter(f, 1)
 
+    #import matplotlib.pyplot as plt
+    #plt.imshow(f)
+    #plt.show()
+
     angles = np.linspace(0, 2 * np.pi / symmetry, nbins_angular, endpoint=False)
     scales = np.arange(min_scale, max_scale, 1)
 
@@ -77,7 +81,8 @@ def detect_scale_fourier_space(image, template, symmetry, min_scale=None, max_sc
 
     unrolled = ndimage.map_coordinates(f, templates, order=1)
     unrolled = unrolled.reshape((len(template), len(scales), len(angles)))
-    unrolled = (unrolled.mean(0) / unrolled.mean((0, 2), keepdims=True))[0]
+    #unrolled = unrolled.mean(0) -
+    unrolled = unrolled.mean(0) - unrolled.mean((0, 2), keepdims=True)[0]
 
     return np.unravel_index(np.argmax(unrolled), unrolled.shape)[0] + min_scale
 
@@ -120,7 +125,7 @@ def detect_scale_real_space(image, model, template, alpha, rmsd_max, min_samplin
 
     for sampling in np.linspace(min_sampling, max_sampling, int(np.ceil((max_sampling - min_sampling) / step_size))):
         points = model(image, sampling)['points']
-
+        print(sampling)
         if len(points) < 3:
             continue
 
