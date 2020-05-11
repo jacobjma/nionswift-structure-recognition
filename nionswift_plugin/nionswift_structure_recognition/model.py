@@ -43,7 +43,7 @@ def pad_to_size(images, height, width, n=16):
     left = max((width - shape[1]) // 2, 0)
     right = max(width - shape[1] - left, 0)
 
-    padding = [up, down, left, right]
+    padding = [left, right, up, down]
 
     return F.pad(images, padding, mode='reflect'), padding
 
@@ -148,8 +148,8 @@ def load_preset_model(preset):
     models_dir = os.path.join(pathlib.Path(__file__).parent.absolute(), 'models')
 
     if preset == 'graphene':
-        model = AtomRecognitionModel.load(os.path.join(models_dir, 'graphene.json'))
         device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+        model = AtomRecognitionModel.load(os.path.join(models_dir, 'graphene.json'))
         model = model.to(device)
         return model
 
@@ -231,9 +231,10 @@ class AtomRecognitionModel:
         density_head = ConvHead(backbone.out_type, 1)
         segmentation_head = ConvHead(backbone.out_type, 3)
 
-        backbone.load_state_dict(torch.load(os.path.join(folder, state['backbone']['weights_file'])))
-        density_head.load_state_dict(torch.load(os.path.join(folder, state['density_head']['weights_file'])))
-        segmentation_head.load_state_dict(torch.load(os.path.join(folder, state['segmentation_head']['weights_file'])))
+        device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+        backbone.load_state_dict(torch.load(os.path.join(folder, state['backbone']['weights_file']), map_location=device))
+        density_head.load_state_dict(torch.load(os.path.join(folder, state['density_head']['weights_file']), map_location=device))
+        segmentation_head.load_state_dict(torch.load(os.path.join(folder, state['segmentation_head']['weights_file']), map_location=device))
 
         return cls(backbone=backbone,
                    density_head=density_head,
@@ -256,11 +257,11 @@ class AtomRecognitionModel:
         # image = cupy_to_pytorch(image)[None, None]
         device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         image = torch.tensor(image)[None, None].to(device)
-
+        
         image, padding = pad_to_size(image, image.shape[2], image.shape[3], n=16)
 
         image = weighted_normalization(image, mask)
-
+        
         return image, sampling, padding
 
     def __call__(self, image, sampling=None):
@@ -289,10 +290,10 @@ class AtomRecognitionModel:
             output.append(self(image, sampling))
 
             if i / len(images) > t:
-                print('{} of {} frames processed'.format(i, len(images)))
+                print('{} of {} frames processed'.format(i+1, len(images)))
                 t += .1
 
-        print('{} of {} frames processed'.format(i, len(images)))
+        print('{} of {} frames processed'.format(i+1, len(images)))
 
         return output
 
