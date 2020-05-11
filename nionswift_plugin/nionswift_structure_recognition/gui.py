@@ -3,14 +3,9 @@ import threading
 
 import numpy as np
 
-# from .dl import DeepLearningModule
-# # from .graph import GraphModule
-# from .scale import ScaleDetectionModule
 from .model import load_preset_model
 from .visualization import mcolors, named_colors, add_points
-# from .widgets import ScrollArea, push_button_template, combo_box_template
-
-from .scale import find_hexagonal_sampling
+from .scale import FourierSpaceCalibrator, RealSpaceCalibrator
 
 _ = gettext.gettext
 
@@ -122,40 +117,28 @@ class ScaleDetectionSection(Section):
 
     def __init__(self, ui):
         super().__init__(ui, 'Calibrate')
-
-    #def create_widgets(self, column):
-        model_row, self.model_combo_box = combo_box_template(self._ui, 'Model',
-                                                             ['Fourier-space Hexagonal', 'Real-space Hexagonal'])
+        space_row, self.space_combo_box = combo_box_template(self._ui, 'Model', ['Fourier-space', 'Real-space'])
+        crystal_system_row, self.crystal_system_combo_box = combo_box_template(self._ui, 'Model', ['Hexagonal'])
         lattice_constant_row, self.lattice_constant_line_edit = line_edit_template(self._ui, 'Lattice constant [Å]')
         min_sampling_row, self.min_sampling_line_edit = line_edit_template(self._ui, 'Min. sampling [Å / pixel]')
         max_sampling_row, self.max_sampling_line_edit = line_edit_template(self._ui, 'Max. sampling [Å / pixel]')
         calibrate_every_row, self.calibrate_every_check_box = check_box_template(self._ui, 'Calibrate every frame')
         calibrate_row, self.calibrate_push_button = push_button_template(self._ui, 'Calibrate current frame')
 
-        self.column.add(model_row)
+        self.column.add(space_row)
+        self.column.add(crystal_system_row)
         self.column.add(lattice_constant_row)
         self.column.add(min_sampling_row)
         self.column.add(max_sampling_row)
         self.column.add(calibrate_every_row)
         self.column.add(calibrate_row)
 
-        self.model_combo_box.current_item = 'Fourier-space Hexagonal'
+        self.space_combo_box.current_item = 'Fourier-space'
+        self.crystal_system_combo_box.current_item = 'Hexagon'
         self.lattice_constant_line_edit.text = 2.46
         self.min_sampling_line_edit.text = .01
         self.max_sampling_line_edit.text = .1
-
-    def fetch_parameters(self):
-        self.model = self.model_combo_box._widget.current_item.lower()
-        self.lattice_constant = float(self.lattice_constant_line_edit._widget.text)
-        self.min_sampling = float(self.min_sampling_line_edit._widget.text)
-
-    def detect_scale(self, image):
-        if self.model not in ['fourier-space hexagonal',
-                              'real-space hexagonal']:
-            raise RuntimeError('model {} not recognized for scale recognition'.format(self.model))
-
-        scale = find_hexagonal_sampling(image, lattice_constant=self.lattice_constant, min_sampling=self.min_sampling)
-        return scale
+        self.calibrate_every_check_box.checked = True
 
 
 class VisualizationModule(StructureRecognitionModule):
@@ -283,7 +266,8 @@ class StructureRecognitionPanelDelegate:
         self.source_data_item = None
         self.stop_live_analysis_event = threading.Event()
         self.stop_live_analysis_event.set()
-        self.model = None
+        self._model = None
+        self._calibrator = None
 
     def create_panel_widget(self, ui, document_controller):
         self.ui = ui
@@ -292,8 +276,8 @@ class StructureRecognitionPanelDelegate:
         scroll_area = ScrollArea(ui._ui)
         scroll_area.content = main_column._widget
 
-        self.scale_detection_module = ScaleDetectionSection(ui)
-        # # self.graph_module = GraphModule(ui, document_controller)
+        self.scale_section = ScaleDetectionSection(ui)
+
         self.visualization_module = VisualizationModule(ui, document_controller)
 
         preset_row, self.preset_combo_box = combo_box_template(self.ui, 'Preset', ['None', 'Graphene'],
@@ -320,19 +304,32 @@ class StructureRecognitionPanelDelegate:
         live_analysis_row.add(run_row)
         # live_analysis_row.add(stop_row)
         main_column.add(live_analysis_row)
-        main_column.add(self.scale_detection_module)
+        main_column.add(self.scale_section)
 
-        #self.scale_detection_module.create_widgets(main_column)
+        # self.scale_detection_module.create_widgets(main_column)
         # self.deep_learning_module.create_widgets(main_column)
         # # self.graph_module.create_widgets(main_column)
         self.visualization_module.create_widgets(main_column)
 
         # self.preset_combo_box.current_item = 'Graphene'
-        #self.scale_detection_module.set_preset('graphene')
+        # self.scale_detection_module.set_preset('graphene')
 
         main_column.add_stretch()
 
         return scroll_area
+
+    def update_parameters(self):
+        if self.scale_section.space_combo_box.current_item.lower() == 'fourier-space':
+            crystal_system = self.scale_section.crystal_system_combo_box.current_item
+            lattice_constant = float(self.scale_section.lattice_constant_line_edit.text)
+            min_sampling = float(self.scale_section.min_sampling_line_edit.text)
+            max_sampling = float(self.scale_section.max_sampling_line_edit.text)
+            self._calibrator = FourierSpaceCalibrator(crystal_system, lattice_constant, min_sampling, max_sampling)
+
+        # self._calibrator =
+        # self.model = self.scale_section.model_combo_box._widget.current_item.lower()
+        # self.lattice_constant = float(self.lattice_constant_line_edit._widget.text)
+        # self.min_sampling = float(self.min_sampling_line_edit._widget.text)
 
     def get_camera(self):
         camera = self.api.get_hardware_source_by_id("superscan", version="1")
@@ -341,11 +338,6 @@ class StructureRecognitionPanelDelegate:
             return self.api.get_hardware_source_by_id('usim_scan_device', '1.0')
         else:
             return camera
-
-    def update_parameters(self):
-        self.scale_detection_module.fetch_parameters()
-        # # self.graph_module.fetch_parameters()
-        self.visualization_module.fetch_parameters()
 
     def check_can_analyse_live(self):
         camera = self.get_camera()
@@ -363,11 +355,11 @@ class StructureRecognitionPanelDelegate:
         # self.thread.join()
 
     def process_live(self):
-        #def thread_this():
-        #t = threading.Thread(target=thread_this)
-        #t.start()
-        #t.join()
-        #if self.model is None:
+        # def thread_this():
+        # t = threading.Thread(target=thread_this)
+        # t.start()
+        # t.join()
+        # if self.model is None:
         #    self.model = load_preset_model('graphene')
 
         self.output_data_item = self.document_controller.library.create_data_item()
@@ -397,21 +389,22 @@ class StructureRecognitionPanelDelegate:
 
                     image = source_data[0].data.copy()
 
-                    sampling = self.scale_detection_module.detect_scale(image)
-                    output = self.model(image, sampling)
+                    sampling = self._calibrator(image)
+                    print(sampling)
+                    # output = self.model(image, sampling)
 
-                    if output is not None:
-                        visualization = self.visualization_module.create_background(image,
-                                                                                    output['density'],
-                                                                                    output['segmentation']
-                                                                                    )
-
-                        visualization = self.visualization_module.add_points(visualization, output['points'])
-
-                        def update_data_item():
-                            data_ref.data = visualization
-
-                        self.api.queue_task(update_data_item)
+                    # if output is not None:
+                    #     visualization = self.visualization_module.create_background(image,
+                    #                                                                 output['density'],
+                    #                                                                 output['segmentation']
+                    #                                                                 )
+                    #
+                    #     visualization = self.visualization_module.add_points(visualization, output['points'])
+                    #
+                    #     def update_data_item():
+                    #         data_ref.data = visualization
+                    #
+                    #     self.api.queue_task(update_data_item)
 
             self.thread = threading.Thread(target=thread_this,
                                            args=(self.stop_live_analysis_event, self.get_camera(), data_ref))

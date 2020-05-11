@@ -10,12 +10,12 @@ class R2DoubleConv(nn.Module):
 
         layers = []
 
-        layers += [e2nn.R2Conv(in_type, out_type, kernel_size=3, padding=1, bias=not batch_norm)]
+        layers += [e2nn.R2Conv(in_type, out_type, kernel_size=3, padding=1, bias=not batch_norm, initialize=False)]
         if batch_norm:
             layers += [e2nn.InnerBatchNorm(out_type)]
         layers += [e2nn.ReLU(out_type, inplace=True)]
 
-        layers += [e2nn.R2Conv(out_type, out_type, kernel_size=3, padding=1, bias=not batch_norm)]
+        layers += [e2nn.R2Conv(out_type, out_type, kernel_size=3, padding=1, bias=not batch_norm, initialize=False)]
         if batch_norm:
             layers += [e2nn.InnerBatchNorm(out_type)]
         layers += [e2nn.ReLU(out_type, inplace=True)]

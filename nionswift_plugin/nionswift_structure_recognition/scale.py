@@ -1,202 +1,171 @@
 import numpy as np
 from scipy import ndimage
-from scipy.cluster.hierarchy import linkage, fcluster
-from scipy.spatial.distance import pdist
+from scipy.ndimage import gaussian_filter
+from scipy.ndimage import zoom
+
+from .geometry import regular_polygon, polygon_area, pairwise_rmsd
+from .geometry import rotate
+from .graph import stable_delaunay_faces
 
 
-def periodic_smooth_decomposition(image):
-    u = image
-    v = u2v(u)
-    v_fft = np.fft.fft2(v)
-    s = v2s(v_fft)
-    s_i = np.fft.ifft2(s)
-    s_f = np.real(s_i)
-    p = u - s_f  # u = p + s
-    return p, s_f
+def cosine_window(x, cutoff, rolloff):
+    rolloff *= cutoff
+    array = .5 * (1 + np.cos(np.pi * (x - cutoff + rolloff) / rolloff))
+    array[x > cutoff] = 0.
+    array = np.where(x > cutoff - rolloff, array, np.ones_like(x))
+    return array
 
 
-def u2v(u):
-    v = np.zeros(u.shape, dtype=u.dtype)
-    v[..., 0, :] = u[..., -1, :] - u[..., 0, :]
-    v[..., -1, :] = u[..., 0, :] - u[..., -1, :]
+def square_crop(image):
+    shape = image.shape
 
-    v[..., :, 0] += u[..., :, -1] - u[..., :, 0]
-    v[..., :, -1] += u[..., :, 0] - u[..., :, -1]
-    return v
+    if image.shape[0] != min(shape):
+        n = (image.shape[0] - image.shape[1]) // 2
+        m = (image.shape[0] - image.shape[1]) - n
+        image = image[n:-m]
+    elif image.shape[1] != min(shape):
+        n = (image.shape[1] - image.shape[0]) // 2
+        m = (image.shape[1] - image.shape[0]) - n
+        image = image[:, n:-m]
 
-
-def v2s(v_hat):
-    M, N = v_hat.shape[-2:]
-
-    q = np.arange(M).reshape(M, 1).astype(v_hat.dtype)
-    r = np.arange(N).reshape(1, N).astype(v_hat.dtype)
-
-    den = (2 * np.cos(np.divide((2 * np.pi * q), M)) + 2 * np.cos(np.divide((2 * np.pi * r), N)) - 4)
-
-    for i in range(len(v_hat.shape) - 2):
-        den = np.enpand_dims(den, 0)
-
-    s = v_hat / (den + 1e-12)
-    s[..., 0, 0] = 0
-    return s
+    return image
 
 
-def periodic_smooth_decomposed_fft(image):
-    p, s = periodic_smooth_decomposition(image)
-    return np.fft.fft2(p)
+def windowed_fft(image):
+    image = square_crop(image)
+    x = np.fft.fftshift(np.fft.fftfreq(image.shape[0]))
+    y = np.fft.fftshift(np.fft.fftfreq(image.shape[1]))
+    r = np.sqrt(x[:, None] ** 2 + y[None] ** 2)
+    m = cosine_window(r, .5, .33)
+    return np.fft.fft2(image * m)
 
 
-def image_as_polar_representation(image, inner=1, outer=None, symmetry=2, bins_per_symmetry=32, offset=0):
-    center = np.array(image.shape[-2:]) // 2
+def detect_scale_fourier_space(image, template, symmetry, min_scale=None, max_scale=None, nbins_angular=16):
+    if symmetry < 2:
+        raise RuntimeError('symmetry must be 2 or greater')
 
-    if outer is None:
-        outer = (np.min(center) // 2).item()
+    min_min_scale = 1 / np.min(np.linalg.norm(template, axis=1))
+    max_max_scale = (min(image.shape) // 2) / np.max(np.linalg.norm(template, axis=1))
 
-    n_radial = int(np.ceil(outer - inner))
-    n_angular = (symmetry // 2) * bins_per_symmetry
+    if min_scale is None:
+        min_scale = min_min_scale
 
-    radials = np.linspace(inner, outer, n_radial)
-    angles = np.linspace(offset, np.pi + offset, n_angular)
-
-    polar_coordinates = center[:, None, None] + radials[None, :, None] * np.array([np.cos(angles), np.sin(angles)])[:,
-                                                                         None]
-    polar_coordinates = polar_coordinates.reshape((2, -1))
-    unrolled = ndimage.map_coordinates(image, polar_coordinates, order=1)
-    unrolled = unrolled.reshape((n_radial, n_angular))
-    unrolled = unrolled.reshape((unrolled.shape[0], symmetry // 2, -1)).sum(1)
-
-    return unrolled
-
-
-def _window_sum_2d(image, window_shape):
-    window_sum = np.cumsum(image, axis=0)
-    window_sum = (window_sum[window_shape[0]:-1] - window_sum[:-window_shape[0] - 1])
-
-    window_sum = np.cumsum(window_sum, axis=1)
-    window_sum = (window_sum[:, window_shape[1]:-1] - window_sum[:, :-window_shape[1] - 1])
-
-    return window_sum
-
-
-def _centered(arr, newshape):
-    # Return the center newshape portion of the array.
-    newshape = np.asarray(newshape)
-    currshape = np.array(arr.shape)
-    startind = (currshape - newshape) // 2
-    endind = startind + newshape
-    myslice = [slice(startind[k], endind[k]) for k in range(len(endind))]
-    return arr[tuple(myslice)]
-
-
-def normalized_cross_correlation_with_2d_gaussian(image, kernel_size, std):
-    kernel_1d = np.exp(-(np.arange(kernel_size) - (kernel_size - 1) / 2) ** 2 / (2 * std ** 2))
-    kernel = np.outer(kernel_1d, kernel_1d)
-    kernel_mean = kernel.mean()
-    kernel_ssd = np.sum((kernel - kernel_mean) ** 2)
-
-    xcorr = ndimage.convolve(ndimage.convolve(image, kernel_1d[None]), kernel_1d[None].T)
-
-    image_window_sum = _window_sum_2d(image, kernel.shape)
-    image_window_sum2 = _window_sum_2d(image ** 2, kernel.shape)
-
-    xcorr = _centered(xcorr, image_window_sum.shape)
-    numerator = xcorr - image_window_sum * kernel_mean
-
-    denominator = image_window_sum2
-    np.multiply(image_window_sum, image_window_sum, out=image_window_sum)
-    np.divide(image_window_sum, np.prod(kernel.shape), out=image_window_sum)
-    denominator -= image_window_sum
-    denominator *= kernel_ssd
-    np.maximum(denominator, 0, out=denominator)
-    np.sqrt(denominator, out=denominator)
-
-    response = np.zeros_like(xcorr, dtype=np.float32)
-    mask = denominator >= np.finfo(np.float32).eps
-    response[mask] = numerator[mask] / (denominator[mask])
-    return response  # np.float32(mask)
-
-
-def find_hexagonal_spots(image, lattice_constant=None, min_sampling=0, max_sampling=None, bins_per_symmetry=16,
-                         return_cartesian=False):
-    if image.shape[0] != image.shape[1]:
-        raise RuntimeError('image is not square')
-
-    n = image.shape[0]
-
-    if (lattice_constant is None) & ((min_sampling is not None) | (max_sampling is not None)):
-        raise RuntimeError()
-
-    k = n / lattice_constant * 2 / np.sqrt(3)
-    if min_sampling is None:
-        inner = 1
     else:
-        inner = max(1, k * min_sampling)
+        min_scale = min(min_scale, min_min_scale)
 
-    if max_sampling is None:
-        outer = None
+    if max_scale is None:
+        max_scale = max_max_scale
+
     else:
-        outer = int(np.floor(min(n // 2, k * max_sampling)))
+        max_scale = min(max_scale, max_max_scale)
 
-    f = periodic_smooth_decomposed_fft(image)
-    f[0, 0] = 0
-    f = np.abs(np.fft.fftshift(f)) ** 2
-    f = (f - f.min()) / (f.max() - f.min())
+    if min_scale > max_scale:
+        raise RuntimeError('min_scale must be less than max_scale')
 
-    peaks = []
-    for w in range(5, 11, 1):
-        response = normalized_cross_correlation_with_2d_gaussian(f, w, w / 8)
-        polar = image_as_polar_representation(response, inner=inner, outer=outer, symmetry=6,
-                                              bins_per_symmetry=bins_per_symmetry)
-        peak = np.vstack(np.unravel_index((-polar).ravel().argsort()[:5], polar.shape)).T
-        peaks.append(peak)
+    f = windowed_fft(image)
+    f = np.log(np.abs(np.fft.fftshift(f)))
+    f = gaussian_filter(f, 1)
 
-    peaks = np.asarray(np.vstack(peaks))
+    angles = np.linspace(0, 2 * np.pi / symmetry, nbins_angular, endpoint=False)
+    scales = np.arange(min_scale, max_scale, 1)
 
-    below_center = peaks[:, 1] > bins_per_symmetry / 2
+    r = np.linalg.norm(template, axis=1)[:, None, None] * scales[None, :, None]
+    a = np.arctan2(template[:, 1], template[:, 0])[:, None, None] + angles[None, None, :]
 
-    peaks = np.vstack([peaks,
-                       np.array([peaks[below_center][:, 0], peaks[below_center][:, 1] - bins_per_symmetry]).T,
-                       np.array([peaks[below_center == 0][:, 0],
-                                 peaks[below_center == 0][:, 1] + bins_per_symmetry]).T])
+    templates = np.array([np.cos(a) * r, np.sin(a) * r])
+    templates = templates.reshape(2, -1) + np.array([f.shape[0] // 2, f.shape[1] // 2])[:, None]
 
-    assignments = fcluster(linkage(pdist(peaks), method='single'), 2, 'distance')
-    unique, counts = np.unique(assignments, return_counts=True)
-    cluster_centers = np.array([np.mean(peaks[assignments == u], axis=0) for u in unique])
+    unrolled = ndimage.map_coordinates(f, templates, order=1)
+    unrolled = unrolled.reshape((len(template), len(scales), len(angles)))
+    unrolled = (unrolled.mean(0) / unrolled.mean((0, 2), keepdims=True))[0]
 
-    valid = (cluster_centers[:, 1] > -1e-12) & (cluster_centers[:, 1] < bins_per_symmetry) & (counts > 3)
-    cluster_centers = cluster_centers[valid][np.argsort(-counts[valid])][:2]
+    return np.unravel_index(np.argmax(unrolled), unrolled.shape)[0] + min_scale
 
-    cluster_centers[:, 0] += inner - .5
-    cluster_centers[:, 1] = (cluster_centers[:, 1] / (bins_per_symmetry * 6) * 2 * np.pi) % (2 * np.pi / 6)
 
-    if len(cluster_centers) > 1:
-        radial_ratio = np.min(cluster_centers[:, 0]) / np.max(cluster_centers[:, 0])
-        angle_diff = np.max(cluster_centers[:, 1]) - np.min(cluster_centers[:, 1])
-        if (np.abs(radial_ratio * np.sqrt(3) - 1) < .1) & (np.abs(angle_diff - np.pi / 6) < np.pi / 10):
-            spot_radial, spot_angle = cluster_centers[np.argmin(cluster_centers[:, 0])]
+class FourierSpaceCalibrator:
+
+    def __init__(self, crystal_system, lattice_constant, min_sampling=None, max_sampling=None):
+        self._crystal_system = crystal_system
+        self._lattice_constant = lattice_constant
+        self._min_sampling = min_sampling
+        self._max_sampling = max_sampling
+
+    def __call__(self, image):
+        if self._crystal_system.lower() == 'hexagonal':
+            k = min(image.shape) / self._lattice_constant * 2 / np.sqrt(3)
+            template = regular_polygon(1., 6)
+            template = np.vstack((template, rotate(template, np.pi / 6) * np.sqrt(3)))
+            symmetry = 6
         else:
-            spot_radial, spot_angle = cluster_centers[0]
+            raise NotImplementedError()
 
-    else:
-        spot_radial, spot_angle = cluster_centers[0]
+        if self._min_sampling is None:
+            min_scale = None
+        else:
+            min_scale = k * self._min_sampling
 
-    if return_cartesian:
-        angles = spot_angle + np.linspace(0, 2 * np.pi, 6, endpoint=False)
-        radial = np.array(spot_radial)[None]
-        return spot_radial, spot_angle, np.array([np.cos(angles) * radial + image.shape[0] // 2,
-                                                  np.sin(angles) * radial + image.shape[0] // 2]).T
-    else:
-        return spot_radial, spot_angle
+        if self._max_sampling is None:
+            max_scale = None
+        else:
+            max_scale = k * self._max_sampling
+
+        return detect_scale_fourier_space(image, template, symmetry, min_scale=min_scale, max_scale=max_scale) / k
 
 
-def find_hexagonal_sampling(image, lattice_constant, min_sampling=None, max_sampling=None):
-    if len(image.shape) > 2:
-        raise RuntimeError()
+def detect_scale_real_space(image, model, template, alpha, rmsd_max, min_sampling, max_sampling, step_size=.005):
+    reference_area = polygon_area(template)
+    max_valid = 0
+    min_rmsd = np.inf
+    best_sampling = None
 
-    if image.shape[0] != image.shape[1]:
-        raise RuntimeError('image is not square')
+    for sampling in np.linspace(min_sampling, max_sampling, int(np.ceil((max_sampling - min_sampling) / step_size))):
+        points = model(image, sampling)['points']
 
-    n = image.shape[0]
+        if len(points) < 3:
+            continue
 
-    radial, _ = find_hexagonal_spots(image, lattice_constant, min_sampling, max_sampling)
-    return (radial * lattice_constant / n * np.sqrt(3) / 2).item()
+        faces = stable_delaunay_faces(points, alpha)
+
+        segments = [points[face] for face in faces]
+        rmsd = pairwise_rmsd([template], segments).ravel()
+
+        valid = rmsd < rmsd_max
+        num_valid = np.sum(valid)
+        if num_valid == 0:
+            continue
+
+        if num_valid >= max_valid:
+            if rmsd[valid].mean() < min_rmsd:
+                area = np.mean([polygon_area(segment) for i, segment in enumerate(segments) if valid[i]])
+                best_sampling = sampling / np.sqrt(reference_area / area)
+
+                max_valid = num_valid
+                min_rmsd = rmsd[valid].mean()
+
+    return best_sampling
+
+
+class RealSpaceCalibrator:
+
+    def __init__(self, model, crystal_system, lattice_constant, min_sampling, max_sampling, step_size=.01):
+        self._model = model
+        self._crystal_system = crystal_system
+        self._lattice_constant = lattice_constant
+        self._min_sampling = min_sampling
+        self._max_sampling = max_sampling
+        self._step_size = step_size
+
+    def __call__(self, image):
+
+        if self._crystal_system.lower() == 'hexagonal':
+            template = regular_polygon(self._lattice_constant / self._model.training_sampling, 6)
+            alpha = 2.
+            rmsd_max = .05
+        else:
+            raise NotImplementedError()
+
+        return detect_scale_real_space(image, model=self._model, template=template,
+                                       alpha=alpha,
+                                       rmsd_max=rmsd_max,
+                                       min_sampling=self._min_sampling,
+                                       max_sampling=self._max_sampling, step_size=self._step_size)

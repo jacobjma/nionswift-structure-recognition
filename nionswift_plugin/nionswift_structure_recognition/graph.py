@@ -1,65 +1,159 @@
-# import numpy as np
-#
-# # from .psm.graph import GeometricGraph
-# # from .psm.rmsd import RMSD
-# # from .psm.templates import regular_polygon
-# from .utils import StructureRecognitionModule
-# from .widgets import Section, line_edit_template
-#
-#
-# class GraphModule(StructureRecognitionModule):
-#
-#     def __init__(self, ui, document_controller):
-#         super().__init__(ui, document_controller)
-#
-#         self.alpha = None
-#         self.cutoff = None
-#
-#     def create_widgets(self, column):
-#         section = Section(self.ui, 'Graph')
-#         column.add(section)
-#
-#         alpha_row, self.alpha_line_edit = line_edit_template(self.ui, 'alpha', default_text=1,
-#                                                              placeholder_text='Do not build')
-#
-#         section.column.add(alpha_row)
-#
-#         cutoff_row, self.cutoff_line_edit = line_edit_template(self.ui, 'cutoff', default_text='',
-#                                                                placeholder_text='Do not use')
-#
-#         section.column.add(cutoff_row)
-#
-#     def set_preset(self, name):
-#         pass
-#
-#     def fetch_parameters(self):
-#         if len(self.alpha_line_edit.text) > 0:
-#             self.alpha = float(self.alpha_line_edit.text)
-#
-#         else:
-#             self.alpha = None
-#
-#         if len(self.cutoff_line_edit.text) > 0:
-#             self.cutoff = float(self.cutoff_line_edit.text)
-#
-#         else:
-#             self.cutoff = np.inf
-#
-#     def build_graph(self, points, sampling):
-#
-#         if self.alpha is not None:
-#
-#             graph = GeometricGraph(points)
-#
-#             graph.build_stable_delaunay_graph(self.alpha, self.cutoff / sampling)
-#
-#             return graph
-#
-#         else:
-#             return None
-#
-#     def register_faces(self, graph):
-#         # templates = [regular_polygon(1,i) for i in range()]
-#         template = regular_polygon(1, 6)
-#         rmsd = RMSD().register(graph.points, graph.faces(), [template])
-#         return rmsd
+from collections import defaultdict
+
+import numba as nb
+import numpy as np
+import scipy.sparse.csgraph
+import scipy.spatial
+from scipy.sparse import csr_matrix
+
+from .utils import label_to_index_generator
+
+
+@nb.njit
+def triangle_angles(p, r, q):
+    angles = np.zeros((len(p), 3))
+    side_lenghts = np.zeros((len(p), 3))
+
+    a2 = np.sum((r - q) ** 2, axis=1)
+    b2 = np.sum((q - p) ** 2, axis=1)
+    c2 = np.sum((p - r) ** 2, axis=1)
+
+    a = np.sqrt(a2)
+    b = np.sqrt(b2)
+    c = np.sqrt(c2)
+
+    side_lenghts[:, 0] = a
+    side_lenghts[:, 1] = b
+    side_lenghts[:, 2] = c
+
+    A = (b2 + c2 - a2) / (2 * b * c)
+    A[A > 1] = 1
+    A[A < -1] = -1
+    angles[:, 0] = np.arccos(A)
+
+    B = (a2 + c2 - b2) / (2 * a * c)
+    B[B > 1] = 1
+    B[B < -1] = -1
+    angles[:, 1] = np.arccos(B)
+
+    angles[:, 2] = np.pi - angles[:, 0] - angles[:, 1]
+    return angles, side_lenghts
+
+
+@nb.njit
+def delaunay_simplex_distance_metrics(points, simplices, neighbors):
+    angles, side_lengths = triangle_angles(points[simplices[:, 0]], points[simplices[:, 1]], points[simplices[:, 2]])
+    alpha = np.zeros(len(neighbors) * 6, dtype=np.float64)
+    r = np.zeros(len(neighbors) * 6, dtype=np.float64)
+    row_ind = np.zeros(len(neighbors) * 6, dtype=np.int32)
+    col_ind = np.zeros(len(neighbors) * 6, dtype=np.int32)
+
+    l = 0
+    for i in range(len(neighbors)):
+        for j in range(3):
+            k = neighbors[i][j]
+            if k == -1:
+                row_ind[l] = i
+                col_ind[l] = len(neighbors)
+                row_ind[l + 1] = len(neighbors)
+                col_ind[l + 1] = i
+
+                alpha[l] = alpha[l + 1] = angles[i][j]
+                r[l] = r[l + 1] = side_lengths[i][j]
+
+            else:
+                row_ind[l] = i
+                col_ind[l] = k
+                row_ind[l + 1] = k
+                col_ind[l + 1] = i
+
+                for m in range(3):
+                    if not np.any(simplices[k][m] == simplices[i]):
+                        break
+
+                alpha[l] = alpha[l + 1] = angles[i][j] + angles[k][m]
+                r[l] = r[l + 1] = side_lengths[i][j]
+            l += 2
+
+    return alpha, r, (row_ind, col_ind)
+
+
+@nb.njit
+def directed_simplex_edges(simplices):
+    edges = np.zeros((len(simplices) * 3, 2), dtype=np.int64)
+    k = 0
+    for i in range(len(simplices)):
+        for j in range(3):
+            edges[k][0] = simplices[i][j - 1]
+            edges[k][1] = simplices[i][j]
+            k += 1
+
+    return edges[:k]
+
+
+@nb.njit
+def order_exterior_vertices(edges):
+    boundary = nb.typed.Dict.empty(
+        key_type=nb.types.int64,
+        value_type=nb.types.int64,
+    )
+
+    for i in range(len(edges)):
+        edge = edges[i]
+        if not np.any(np.sum(edge[::-1] == edges[:], axis=1) == 2):
+            boundary[edge[0]] = edge[1]
+
+    order = [boundary[list(boundary.keys())[0]]]
+    for i in range(len(boundary) - 1):
+        order.append(boundary[order[i]])
+
+    return order
+
+
+def join_simplices(simplices, labels):
+    joined_simplices = []
+    for i, simplex_indices in label_to_index_generator(labels):
+        if len(simplex_indices) > 0:
+            simplex_edges = directed_simplex_edges(simplices[simplex_indices])
+            joined_simplices.append(order_exterior_vertices(simplex_edges))
+    return joined_simplices
+
+
+def stable_delaunay_faces(points, alpha_threshold, r_threshold=np.inf):
+    delaunay = scipy.spatial.Delaunay(points)
+    simplices = delaunay.simplices
+    neighbors = delaunay.neighbors
+
+    alpha, r, (row_ind, col_ind) = delaunay_simplex_distance_metrics(points, simplices, neighbors)
+
+    connected = (alpha > alpha_threshold) + (r > r_threshold)
+
+    row_ind = row_ind[connected]
+    col_ind = col_ind[connected]
+
+    M = csr_matrix((np.ones(len(row_ind), dtype=np.bool), (row_ind, col_ind)), (len(neighbors) + 1,) * 2, dtype=np.bool)
+
+    _, labels = scipy.sparse.csgraph.connected_components(M)
+    labels[labels == labels[-1]] = -1
+
+    faces = join_simplices(simplices, labels)
+    return faces
+
+
+def faces_to_edges(faces):
+    edges = set()
+    for face in faces:
+        for i in range(len(face)):
+            edges.add(frozenset({face[i - 1], face[i]}))
+    return [list(edge) for edge in edges]
+
+
+def faces_to_adjacency(faces, num_nodes):
+    adjacency = defaultdict(set)
+    for face in faces:
+        for i in range(len(face)):
+            adjacency[face[i]].add(face[i - 1])
+        for i in range(-1, len(face) - 1):
+            adjacency[face[i]].add(face[i + 1])
+
+    return [list(adjacency[i]) for i in range(num_nodes)]
