@@ -5,11 +5,11 @@ import pathlib
 import numpy as np
 import skimage.measure
 import skimage.util
+import skimage.transform
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from scipy.cluster.hierarchy import linkage, fcluster
-from scipy.ndimage import zoom
 from scipy.spatial.distance import pdist
 
 from .unet import R2UNet, ConvHead
@@ -116,7 +116,7 @@ def integrate_discs(points, array, radius):
     X, Y, r2 = disc_indices(radius)
     weights = np.exp(-r2 / (2 * (radius / 3) ** 2))
 
-    probabilities = np.zeros((len(points), 3))
+    probabilities = np.zeros((len(points), 4))
     for i, point in enumerate(points):
         X_ = point[0] + X
         Y_ = point[1] + Y
@@ -144,13 +144,15 @@ def merge_dopants_into_contamination(segmentation):
     return new_segmentation
 
 
-def load_preset_model(preset):
+def load_preset_model(preset, device=None):
     models_dir = os.path.join(pathlib.Path(__file__).parent.absolute(), 'models')
 
-    if preset == 'graphene':
+    if device is None:
         device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-        model = AtomRecognitionModel.load(os.path.join(models_dir, 'graphene.json'))
-        model = model.to(device)
+
+    if preset == 'graphene':
+
+        model = AtomRecognitionModel.load(os.path.join(models_dir, 'graphene.json'), device=device)
         return model
 
     else:
@@ -170,7 +172,7 @@ class SeparableFilter(nn.Module):
 
 class GaussianFilter2d(SeparableFilter):
     def __init__(self, sigma):
-        kernel_size = int(np.ceil(sigma) ** 2) * 2 + 1
+        kernel_size = int(np.ceil(sigma)) * 8 + 1
         A = 1 / (sigma * np.sqrt(2 * np.pi))
         kernel = A * torch.exp(-(torch.arange(kernel_size) - (kernel_size - 1) / 2) ** 2 / (2 * sigma ** 2))
         super().__init__(kernel)
@@ -200,10 +202,31 @@ class PeakEnhancementFilter(nn.Module):
         return temp
 
 
+def threshold_otsu(tensor, nbins=256):
+    min_value = tensor.min()
+    max_value = tensor.max()
+
+    hist = torch.histc(tensor, bins=nbins, min=min_value, max=max_value)
+
+    bin_centers = torch.linspace(min_value, max_value, nbins).to(tensor)
+
+    weight1 = torch.cumsum(hist, 0)
+    weight2 = torch.flip(torch.cumsum(torch.flip(hist, (0,)), 0), (0,))
+
+    mean1 = torch.cumsum(hist * bin_centers, 0) / weight1
+    mean2 = torch.flip(torch.cumsum(torch.flip(hist * bin_centers, (0,)), 0) / torch.flip(weight2, (0,)), (0,))
+
+    variance12 = weight1[:-1] * weight2[1:] * (mean1[:-1] - mean2[1:]) ** 2
+    idx = torch.argmax(variance12)
+    threshold = bin_centers[:-1][idx]
+
+    return threshold.item()
+
+
 class AtomRecognitionModel:
 
     def __init__(self, backbone, density_head, segmentation_head, training_sampling, density_sigma, threshold,
-                 enhancement_filter_kwargs):
+                 enhancement_filter_kwargs, device):
         self._backbone = backbone
         self._segmentation_head = segmentation_head
         self._density_head = density_head
@@ -211,6 +234,9 @@ class AtomRecognitionModel:
         self._density_sigma = density_sigma
         self._threshold = threshold
         self._enhancement_filter = PeakEnhancementFilter(**enhancement_filter_kwargs)
+        self._device = device
+        if device is not None:
+            self.to(device)
 
     def to(self, *args, **kwargs):
         self._backbone.to(*args, **kwargs)
@@ -220,21 +246,25 @@ class AtomRecognitionModel:
         return self
 
     @classmethod
-    def load(cls, path):
-
+    def load(cls, path, device=None):
         with open(path, 'r') as fp:
             state = json.load(fp)
 
         folder = os.path.dirname(path)
 
-        backbone = R2UNet(1, 8)
+        backbone = R2UNet(1, 6)
         density_head = ConvHead(backbone.out_type, 1)
-        segmentation_head = ConvHead(backbone.out_type, 3)
+        segmentation_head = ConvHead(backbone.out_type, state['segmentation_head']['num_classes'])
 
-        device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-        backbone.load_state_dict(torch.load(os.path.join(folder, state['backbone']['weights_file']), map_location=device))
-        density_head.load_state_dict(torch.load(os.path.join(folder, state['density_head']['weights_file']), map_location=device))
-        segmentation_head.load_state_dict(torch.load(os.path.join(folder, state['segmentation_head']['weights_file']), map_location=device))
+        if device is None:
+            device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
+        backbone.load_state_dict(
+            torch.load(os.path.join(folder, state['backbone']['weights_file']), map_location=device))
+        density_head.load_state_dict(
+            torch.load(os.path.join(folder, state['density_head']['weights_file']), map_location=device))
+        segmentation_head.load_state_dict(
+            torch.load(os.path.join(folder, state['segmentation_head']['weights_file']), map_location=device))
 
         return cls(backbone=backbone,
                    density_head=density_head,
@@ -242,31 +272,55 @@ class AtomRecognitionModel:
                    training_sampling=state['training_sampling'],
                    density_sigma=state['density_sigma'],
                    threshold=state['threshold'],
-                   enhancement_filter_kwargs=state['enhancement_filter'])
+                   enhancement_filter_kwargs=state['enhancement_filter'],
+                   device=device)
 
     @property
     def training_sampling(self):
         return self._training_sampling
 
-    def prepare_image(self, image, sampling=None, mask=None):
+    @property
+    def is_cuda(self):
+        return next(self._backbone.parameters()).is_cuda
+
+    def prepare_image(self, image, sampling, mask=None):
         image = image.astype(np.float32)
 
-        if sampling is not None:
-            image = zoom(image, zoom=sampling / self._training_sampling)
+        image = torch.tensor(image)[None, None].to(self._device)
 
-        # image = cupy_to_pytorch(image)[None, None]
-        device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-        image = torch.tensor(image)[None, None].to(device)
-        
+        # image = GaussianFilter2d(2).to(image)(image)
+        # print(0.2 / sampling, 1/(sampling / self._training_sampling))
+
+        image = F.interpolate(image, scale_factor=sampling / self._training_sampling, mode='area')
+
         image, padding = pad_to_size(image, image.shape[2], image.shape[3], n=16)
 
+        # if mask is None:
+        #    mask = (image < threshold_otsu(image)).type(torch.float32)
+
         image = weighted_normalization(image, mask)
-        
+
         return image, sampling, padding
 
-    def __call__(self, image, sampling=None):
+    def get_max_fov(self):
+        available_memory = torch.cuda.get_device_properties(0).total_memory
+        max_memory = .9 * available_memory
+        max_elements = (1024 * 1024) * max_memory / 1448010752
+        return max_elements * self.training_sampling ** 2
+
+    def __call__(self, image, sampling, recurrent_normalization=False):
+        if len(image.shape) != 2:
+            raise RuntimeError()
+
+        if self._device.type.split(':')[0] == 'cuda':
+            fov = np.prod(image.shape) * sampling ** 2
+            max_fov = self.get_max_fov()
+            if fov > max_fov:
+                print('predicted fov area {:.3f} Angstrom^2 exceeds maximum ({:.3f} Å^2)'.format(fov, max_fov))
+                return None
+
         try:
-            return self.predict(image, sampling=sampling)
+            return self.predict(image, sampling=sampling, recurrent_normalization=recurrent_normalization)
         except RuntimeError as e:
             if 'out of memory' in str(e):
                 print('WARNING: ran out of memory')
@@ -290,66 +344,75 @@ class AtomRecognitionModel:
             output.append(self(image, sampling))
 
             if i / len(images) > t:
-                print('{} of {} frames processed'.format(i+1, len(images)))
+                print('{} of {} frames processed'.format(i + 1, len(images)))
                 t += .1
 
-        print('{} of {} frames processed'.format(i+1, len(images)))
+        print('all frames processed')
 
         return output
 
-    def predict(self, image, sampling=None):
+    def predict(self, image, sampling=None, recurrent_normalization=False):
         with torch.no_grad():
-            preprocessed, sampling, padding = self.prepare_image(image.copy(), sampling)
+
+            preprocessed, sampling, padding = self.prepare_image(image, sampling)
+
+            if recurrent_normalization:
+                segmentation = nn.Softmax(1)(self._segmentation_head(self._backbone(preprocessed)))
+                mask = segmentation[:, 1, None] + segmentation[:, 3, None]
+                preprocessed, sampling, padding = self.prepare_image(image, sampling, mask)
 
             features = self._backbone(preprocessed)
             segmentation = nn.Softmax(1)(self._segmentation_head(features))
 
-            mask = (segmentation[0, 0] + segmentation[0, 2])[None, None]
-
-            preprocessed, sampling, padding = self.prepare_image(image.copy(), sampling, mask)
-
-            features = self._backbone(preprocessed)
-
-            segmentation = nn.Softmax(1)(self._segmentation_head(features))
             density = nn.Sigmoid()(self._density_head(features))
 
             markers = self._enhancement_filter(density)
+            classes = segmentation.argmax(1, keepdim=True)
 
-            markers = markers.detach().cpu().numpy()[0, 0]
-            segmentation = segmentation.detach().cpu().numpy()[0]
+            contamination = classes == 2
+            classes = F.interpolate(classes.type(torch.float32),
+                                    scale_factor=self.training_sampling / sampling).type(torch.int)
+            density = F.interpolate(density, scale_factor=self.training_sampling / sampling)
+
+            markers = markers[0, 0].detach().cpu().numpy()
+            density = density[0, 0].detach().cpu().numpy()
+            classes = classes[0, 0].detach().cpu().numpy()
+            contamination = contamination[0, 0].detach().cpu().numpy()
+            segmentation = segmentation[0].detach().cpu().numpy()
 
         torch.cuda.empty_cache()
 
-        points = np.array(np.where(markers > self._threshold)).T
-
+        points = np.array(np.where(markers > self._threshold * self._density_sigma ** 2 * 2 * np.pi)).T
         points, indices = merge_close_points(points, self._density_sigma)
 
         label_probabilities = integrate_discs(points, segmentation, self._density_sigma)
         labels = np.argmax(label_probabilities, axis=-1)
 
-        points = points[labels != 1]
-        labels = labels[labels != 1]
-
-        contamination = merge_dopants_into_contamination(np.argmax(segmentation, axis=0)) == 1
-
-        scale_factor = 16
-        contamination = skimage.util.view_as_blocks(contamination, (scale_factor,) * 2).sum((-2, -1)) > (
-                scale_factor ** 2 / 2)
-        contamination = (np.array(np.where(contamination)).T) * 16 + 8
-
-        points = np.vstack((points, contamination))
-        labels = np.concatenate((labels, np.ones(len(contamination), dtype=labels.dtype)))
+        valid = (labels != 0) & (labels != 2)
+        points = points[valid]
+        labels = labels[valid]
 
         points = points.astype(np.float)
         points = points - padding[0]
+
+        if np.any(contamination):
+            contamination = skimage.transform.rescale(contamination, .5)
+            contamination = np.pad(contamination, ((1, 1), (1, 1)))
+            contours = skimage.measure.find_contours(contamination, .9)
+
+            if (len(contours) > 0) & (len(points) > 0):
+                contours = (np.vstack(contours) - 1) * 2 - padding[0]
+                contours = contours[::10]
+                points = np.vstack((points, contours))
+                labels = np.concatenate((labels, np.full(len(contours), 2)))
 
         if sampling is not None:
             points *= self._training_sampling / sampling
 
         output = {'points': points[:, ::-1],
                   'labels': labels,
-                  'density': density[0, 0].detach().cpu().numpy(),
-                  'segmentation': segmentation,
+                  'density': density,
+                  'segmentation': classes,
                   'sampling': sampling}
 
         return output

@@ -9,17 +9,17 @@
   },
   "segmentation_head": {
     "weights_file": "graphene-segmentation.pt",
-    "num_classes": 3
+    "num_classes": 4
   },
-  "training_sampling": 0.05,
-  "density_sigma": 6,
-  "threshold": 70,
+  "training_sampling": 0.1,
+  "density_sigma": 3,
+  "threshold": 0.5,
   "enhancement_filter": {
-    "alpha": 3,
+    "alpha": 4,
     "sigmas": [
-      6,
-      12
+      3,
+      6
     ],
-    "iterations": 10
+    "iterations": 12
   }
 }

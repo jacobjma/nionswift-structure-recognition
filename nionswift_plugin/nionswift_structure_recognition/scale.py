@@ -1,11 +1,11 @@
 import numpy as np
 from scipy import ndimage
 from scipy.ndimage import gaussian_filter
-from scipy.ndimage import zoom
 
-from .geometry import regular_polygon, polygon_area, pairwise_rmsd
-from .geometry import rotate
-from .graph import stable_delaunay_faces
+from psm.geometry import regular_polygon, polygon_area
+from psm.structures.utils import rotate
+from psm.rmsd import pairwise_rmsd
+from psm.graph import stable_delaunay_faces
 
 
 def cosine_window(x, cutoff, rolloff):
@@ -66,9 +66,9 @@ def detect_scale_fourier_space(image, template, symmetry, min_scale=None, max_sc
     f = np.log(np.abs(np.fft.fftshift(f)))
     f = gaussian_filter(f, 1)
 
-    #import matplotlib.pyplot as plt
-    #plt.imshow(f)
-    #plt.show()
+    # import matplotlib.pyplot as plt
+    # plt.imshow(f)
+    # plt.show()
 
     angles = np.linspace(0, 2 * np.pi / symmetry, nbins_angular, endpoint=False)
     scales = np.arange(min_scale, max_scale, 1)
@@ -81,7 +81,6 @@ def detect_scale_fourier_space(image, template, symmetry, min_scale=None, max_sc
 
     unrolled = ndimage.map_coordinates(f, templates, order=1)
     unrolled = unrolled.reshape((len(template), len(scales), len(angles)))
-    #unrolled = unrolled.mean(0) -
     unrolled = unrolled.mean(0) - unrolled.mean((0, 2), keepdims=True)[0]
 
     return np.unravel_index(np.argmax(unrolled), unrolled.shape)[0] + min_scale
@@ -89,88 +88,95 @@ def detect_scale_fourier_space(image, template, symmetry, min_scale=None, max_sc
 
 class FourierSpaceCalibrator:
 
-    def __init__(self, crystal_system, lattice_constant, min_sampling=None, max_sampling=None):
-        self._crystal_system = crystal_system
-        self._lattice_constant = lattice_constant
-        self._min_sampling = min_sampling
-        self._max_sampling = max_sampling
+    def __init__(self, template, lattice_constant, min_sampling=None, max_sampling=None):
+        self.template = template
+        self.lattice_constant = lattice_constant
+        self.min_sampling = min_sampling
+        self.max_sampling = max_sampling
 
     def __call__(self, image):
-        if self._crystal_system.lower() == 'hexagonal':
-            k = min(image.shape) / self._lattice_constant * 2 / np.sqrt(3)
+        if self.template.lower() == 'hexagonal':
+            k = min(image.shape) / self.lattice_constant * 2 / np.sqrt(3)
             template = regular_polygon(1., 6)
-            template = np.vstack((template, rotate(template, np.pi / 6) * np.sqrt(3)))
+            template = np.vstack((template, rotate(template, 30) * np.sqrt(3)))
             symmetry = 6
         else:
             raise NotImplementedError()
 
-        if self._min_sampling is None:
+        if self.min_sampling is None:
             min_scale = None
         else:
-            min_scale = k * self._min_sampling
+            min_scale = k * self.min_sampling
 
-        if self._max_sampling is None:
+        if self.max_sampling is None:
             max_scale = None
         else:
-            max_scale = k * self._max_sampling
+            max_scale = k * self.max_sampling
 
         return detect_scale_fourier_space(image, template, symmetry, min_scale=min_scale, max_scale=max_scale) / k
 
 
-def detect_scale_real_space(image, model, template, alpha, rmsd_max, min_sampling, max_sampling, step_size=.005):
-    reference_area = polygon_area(template)
+def detect_scale_real_space(image, model, template, alpha, rmsd_max, min_sampling, max_sampling, step_size=.01):
     max_valid = 0
-    min_rmsd = np.inf
     best_sampling = None
 
     for sampling in np.linspace(min_sampling, max_sampling, int(np.ceil((max_sampling - min_sampling) / step_size))):
         points = model(image, sampling)['points']
-        print(sampling)
         if len(points) < 3:
             continue
 
         faces = stable_delaunay_faces(points, alpha)
 
         segments = [points[face] for face in faces]
-        rmsd = pairwise_rmsd([template], segments).ravel()
+        reference_area = polygon_area(template / sampling)
+
+        rmsd = pairwise_rmsd([template / sampling], segments).ravel()
+
+        # print(sampling)
+        # import matplotlib.pyplot as plt
+        # plt.plot(*points.T,'o')
+        # plt.show()
 
         valid = rmsd < rmsd_max
-        num_valid = np.sum(valid)
-        if num_valid == 0:
+        valid = np.where(valid)[0]
+        if len(valid) == 0:
             continue
 
-        if num_valid >= max_valid:
-            if rmsd[valid].mean() < min_rmsd:
-                area = np.mean([polygon_area(segment) for i, segment in enumerate(segments) if valid[i]])
-                best_sampling = sampling / np.sqrt(reference_area / area)
+        valid_area = 0.
+        for i in valid:
+            valid_area += polygon_area(points[faces[i]])
 
-                max_valid = num_valid
-                min_rmsd = rmsd[valid].mean()
+        valid_area_fraction = valid_area / np.prod(image.shape)
+
+        if valid_area_fraction > max_valid:
+            area = valid_area / len(valid)
+            best_sampling = sampling * np.sqrt(reference_area / area)
+            max_valid = valid_area_fraction
 
     return best_sampling
 
 
 class RealSpaceCalibrator:
 
-    def __init__(self, model, crystal_system, lattice_constant, min_sampling, max_sampling, step_size=.01):
-        self._model = model
-        self._crystal_system = crystal_system
-        self._lattice_constant = lattice_constant
-        self._min_sampling = min_sampling
-        self._max_sampling = max_sampling
-        self._step_size = step_size
+    def __init__(self, model, template, lattice_constant, min_sampling, max_sampling, step_size=.01):
+        self.model = model
+        self.template = template
+        self.lattice_constant = lattice_constant
+        self.min_sampling = min_sampling
+        self.max_sampling = max_sampling
+        self.step_size = step_size
 
     def __call__(self, image):
 
-        if self._crystal_system.lower() == 'hexagonal':
-            template = regular_polygon(self._lattice_constant / self._model.training_sampling, 6)
+        if self.template.lower() == 'hexagonal':
+            template = regular_polygon(self.lattice_constant / np.sqrt(3), 6)
             alpha = 2.
             rmsd_max = .05
         else:
             raise NotImplementedError()
 
-        return detect_scale_real_space(image, model=self._model, template=template,
+        return detect_scale_real_space(image, model=self.model, template=template,
                                        alpha=alpha,
                                        rmsd_max=rmsd_max,
-                                       min_sampling=self._min_sampling,
-                                       max_sampling=self._max_sampling, step_size=self._step_size)
+                                       min_sampling=self.min_sampling,
+                                       max_sampling=self.max_sampling, step_size=self.step_size)

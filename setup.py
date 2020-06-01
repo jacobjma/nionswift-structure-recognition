@@ -7,7 +7,7 @@ setuptools.setup(
     author="Jacob Madsen",
     author_email="jacob.madsen@univie.ac.at",
     description="Deep learning structure recognition of atomic resolution images",
-    packages=["nionswift_plugin.nionswift_structure_recognition"],
+    packages=["nionswift_plugin.nionswift_structure_recognition", "psm"],
     package_data={"nionswift_plugin.nionswift_structure_recognition": ["models/*", "presets/*"]},
     include_package_data=True,
     python_requires='~=3.6',
