@@ -247,6 +247,9 @@ class AtomRecognitionModel:
 
     @classmethod
     def load(cls, path, device=None):
+
+        os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
+
         with open(path, 'r') as fp:
             state = json.load(fp)
 
@@ -291,9 +294,10 @@ class AtomRecognitionModel:
         # image = GaussianFilter2d(2).to(image)(image)
         # print(0.2 / sampling, 1/(sampling / self._training_sampling))
 
-        image = F.interpolate(image, scale_factor=sampling / self._training_sampling, mode='area')
+        image = F.interpolate(image, scale_factor=sampling / self._training_sampling, mode='area',
+                              recompute_scale_factor=False)
 
-        image, padding = pad_to_size(image, image.shape[2], image.shape[3], n=16)
+        image, padding = pad_to_size(image, image.shape[2] + 2, image.shape[3] + 2, n=16)
 
         # if mask is None:
         #    mask = (image < threshold_otsu(image)).type(torch.float32)
@@ -351,7 +355,7 @@ class AtomRecognitionModel:
 
         return output
 
-    def predict(self, image, sampling=None, recurrent_normalization=False):
+    def predict(self, image, sampling, recurrent_normalization=False):
         with torch.no_grad():
 
             preprocessed, sampling, padding = self.prepare_image(image, sampling)
@@ -388,12 +392,21 @@ class AtomRecognitionModel:
         label_probabilities = integrate_discs(points, segmentation, self._density_sigma)
         labels = np.argmax(label_probabilities, axis=-1)
 
-        valid = (labels != 0) & (labels != 2)
-        points = points[valid]
-        labels = labels[valid]
-
         points = points.astype(np.float)
         points = points - padding[0]
+
+        if sampling is not None:
+            points *= self._training_sampling / sampling
+
+        valid = ((labels != 0) &
+                 (labels != 2) &
+                 (points[:, 0] > 0) &
+                 (points[:, 1] > 0) &
+                 (points[:, 0] < image.shape[0]) &
+                 (points[:, 1] < image.shape[1]))
+
+        points = points[valid]
+        labels = labels[valid]
 
         if np.any(contamination):
             contamination = skimage.transform.rescale(contamination, .5)
@@ -402,12 +415,9 @@ class AtomRecognitionModel:
 
             if (len(contours) > 0) & (len(points) > 0):
                 contours = (np.vstack(contours) - 1) * 2 - padding[0]
-                contours = contours[::10]
+                contours = contours[::10] * self._training_sampling / sampling
                 points = np.vstack((points, contours))
                 labels = np.concatenate((labels, np.full(len(contours), 2)))
-
-        if sampling is not None:
-            points *= self._training_sampling / sampling
 
         output = {'points': points[:, ::-1],
                   'labels': labels,
