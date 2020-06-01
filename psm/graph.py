@@ -3,7 +3,6 @@ import json
 import os
 from functools import lru_cache
 
-import matplotlib.pyplot as plt
 import numpy as np
 from scipy.sparse.csgraph import connected_components
 
@@ -57,6 +56,8 @@ class GeometricGraphBase:
         return [self.labels[face] for face in self.faces]
 
     def plot(self, ax=None, point_colors=None, face_colors=None, point_kwargs=None, line_kwargs=None):
+        import matplotlib.pyplot as plt
+
         if ax is None:
             ax = plt.subplot()
 

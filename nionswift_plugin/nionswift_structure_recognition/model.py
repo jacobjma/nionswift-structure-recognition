@@ -294,8 +294,7 @@ class AtomRecognitionModel:
         # image = GaussianFilter2d(2).to(image)(image)
         # print(0.2 / sampling, 1/(sampling / self._training_sampling))
 
-        image = F.interpolate(image, scale_factor=sampling / self._training_sampling, mode='area',
-                              recompute_scale_factor=False)
+        image = F.interpolate(image, scale_factor=sampling / self._training_sampling, mode='area')
 
         image, padding = pad_to_size(image, image.shape[2] + 2, image.shape[3] + 2, n=16)
 

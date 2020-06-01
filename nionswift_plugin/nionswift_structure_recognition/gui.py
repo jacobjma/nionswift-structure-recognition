@@ -120,8 +120,12 @@ class DeepLearningSection(Section):
         self.recurrent_normalize = True
         self.recurrent_normalize_check_box._widget.bind_checked(Binding.PropertyBinding(self, 'recurrent_normalize'))
 
+        boundary_extrapolation_row, self.boundary_extrapolation_line_edit = line_edit_template(self._ui, 'Bondary extrapolation [Å]')
+        self.boundary_extrapolation_line_edit._widget._behavior.enabled = False
+
         self.column.add(model_row)
         self.column.add(recurrent_normalize_row)
+        self.column.add(boundary_extrapolation_row)
 
 
 class ScaleDetectionSection(Section):
