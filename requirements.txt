@@ -5,3 +5,5 @@ scipy
 opencv-python
 matplotlib
 pytest
+numba
+scikit-image
