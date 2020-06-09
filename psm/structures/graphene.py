@@ -161,6 +161,9 @@ def neighbor_segments(adjacency, points):
 
 
 def assign_sublattice(points, bond_length, alpha=2.2, principal_orientation=None):
+    if len(points) < 3:
+        raise RuntimeError('no graphene lattice found')
+
     faces = stable_delaunay_faces(points, alpha)
 
     adjacency = faces_to_adjacency(faces, len(points))
@@ -170,7 +173,7 @@ def assign_sublattice(points, bond_length, alpha=2.2, principal_orientation=None
     templates = [neighbor_template(bond_length)]
 
     rmsd = pairwise_rmsd(templates, segments).ravel()
-    
+
     if np.all(rmsd == np.inf):
         raise RuntimeError('no graphene lattice found')
 

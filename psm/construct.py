@@ -122,6 +122,7 @@ def stable_delaunay_faces(points, alpha_threshold, r_threshold=np.inf):
     delaunay = scipy.spatial.Delaunay(points)
     simplices = delaunay.simplices
     neighbors = delaunay.neighbors
+    delaunay.close()
 
     alpha, r, (row_ind, col_ind) = delaunay_simplex_distance_metrics(points, simplices, neighbors)
 
