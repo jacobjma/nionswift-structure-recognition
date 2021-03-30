@@ -1,3 +1,4 @@
+numba
 numpy
 torch
 torchvision
@@ -5,5 +6,7 @@ scipy
 opencv-python
 matplotlib
 pytest
-numba
 scikit-image
+e2cnn
+pytorch_lightning
+torchgeometry
