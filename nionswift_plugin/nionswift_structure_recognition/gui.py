@@ -1,20 +1,18 @@
 import gettext
+import logging
 import threading
 
 import numpy as np
+from fourier_scale_calibration import FourierSpaceCalibrator
 from nion.utils import Binding, Event
+from temnet.temnet import load_preset_model
 
-import warnings
-import logging
-
-from psm.geometry import regular_polygon
-from psm.graph import stable_delaunay_graph
-from psm.rmsd import pairwise_rmsd
-from psm.structures.graphene import defect_fingerprint
-from psm.utils import flatten_list_of_lists
-from psm.select import select_faces_around_nodes, select_nodes_in_faces
-from .model import load_preset_model
-from .scale import FourierSpaceCalibrator, RealSpaceCalibrator
+# from psm.geometry import regular_polygon
+from temnet.psm.graph import stable_delaunay_graph
+# from psm.rmsd import pairwise_rmsd
+# from psm.select import select_faces_around_nodes, select_nodes_in_faces
+# from psm.structures.graphene import defect_fingerprint
+# from psm.utils import flatten_list_of_lists
 from .visualization import add_points, array_to_uint8_image, segmentation_to_uint8_image, add_edges, add_polygons, \
     add_text
 
@@ -120,7 +118,8 @@ class DeepLearningSection(Section):
         self.recurrent_normalize = True
         self.recurrent_normalize_check_box._widget.bind_checked(Binding.PropertyBinding(self, 'recurrent_normalize'))
 
-        boundary_extrapolation_row, self.boundary_extrapolation_line_edit = line_edit_template(self._ui, 'Bondary extrapolation [Å]')
+        boundary_extrapolation_row, self.boundary_extrapolation_line_edit = line_edit_template(self._ui,
+                                                                                               'Bondary extrapolation [Å]')
         self.boundary_extrapolation_line_edit._widget._behavior.enabled = False
 
         self.column.add(model_row)
@@ -138,7 +137,8 @@ class ScaleDetectionSection(Section):
         self.space = 0
         self.space_combo_box._widget.bind_current_index(Binding.PropertyBinding(self, 'space'))
 
-        template_row, self.template_combo_box = combo_box_template(self._ui, 'Template', ['Hexagonal'])
+        template_row, self.template_combo_box = combo_box_template(self._ui, 'Template', ['Hexagonal',
+                                                                                          '2nd-order-hexagonal'])
         self.template = 0
         self.template_combo_box._widget.bind_current_index(Binding.PropertyBinding(self, 'template'))
 
@@ -172,6 +172,8 @@ class ScaleDetectionSection(Section):
 
         if self.template == 0:
             template = 'hexagonal'
+        elif self.template == 1:
+            template = '2nd-order-hexagonal'
         else:
             raise RuntimeError()
 
@@ -212,11 +214,10 @@ class GraphSection(Section):
         self.column.add(library_row)
         self.column.add(match_row)
 
-    def build_graph(self, points, labels, sampling):
+    def build_graph(self, points):
         alpha = float(self.alpha)
-        cutoff = float(self.cutoff)
-        graph = stable_delaunay_graph(points, alpha, cutoff / sampling)
-        graph.set_labels(labels)
+        graph = stable_delaunay_graph(points, alpha)
+        # graph.set_labels(labels)
         return graph
 
     def analyze_defects(self, graph, sampling):
@@ -227,6 +228,7 @@ class GraphSection(Section):
         invalid_faces = contamination_faces + outer_adjacent_faces
 
         template = regular_polygon(1.42, 6) / sampling
+
         rmsd = pairwise_rmsd([template], graph.face_polygons, B_labels=graph.face_labels).ravel()
         defect_faces = rmsd > .07
         defect_faces[invalid_faces] = False
@@ -247,7 +249,7 @@ class GraphSection(Section):
                 defects.append({})
                 defects[-1]['graph'] = defect
                 defects[-1]['dual'] = dual
-                # TODO : fix connect edges bug, resulting in crash
+
                 defects[-1]['enclosing_path'] = defects[-1]['dual'].outer_face_polygons()[0]
                 defects[-1]['contamination'] = len(set(contamination_faces).intersection(defect_nodes)) > 0
                 defects[-1]['outside'] = len(set(outer_adjacent_faces).intersection(defect_nodes)) > 0
@@ -281,8 +283,8 @@ class VisualizationSection(Section):
         self.point_size = .2
         self.point_size_line_edit._widget.bind_text(Binding.PropertyBinding(self, 'point_size'))
 
-        point_color_row, self.point_color_combo_box = combo_box_template(ui, 'Point color', ['Class',
-                                                                                             'Solid'])
+        point_color_row, self.point_color_combo_box = combo_box_template(ui, 'Point color', ['Solid',
+                                                                                             'Class'])
         self.point_color = 0
         self.point_color_combo_box._widget.bind_current_index(Binding.PropertyBinding(self, 'point_color'))
 
@@ -307,49 +309,49 @@ class VisualizationSection(Section):
         self.column.add(outlines_row)
         self.column.add(tag_row)
 
-    def create_visualization(self, image, sampling, output, graph, defects=None):
+    def create_visualization(self, image, sampling, output, graph=None, defects=None):
 
         if self.background == 0:
             visualization = array_to_uint8_image(image)
 
         elif self.background == 1:
-            visualization = array_to_uint8_image(output['density'])
+            visualization = array_to_uint8_image(output['aligned_densities'])
 
         elif self.background == 2:
-            visualization = segmentation_to_uint8_image(output['segmentation'])
+            visualization = segmentation_to_uint8_image(output['aligned_segmentations'])
 
         else:
             raise RuntimeError()
 
         point_size = int(float(self.point_size) / sampling)
 
-        if graph is None:
-            return visualization
-
         if self.overlay_graph:
-            add_edges(visualization, graph.points, graph.edges, (0, 0, 0))
+            if graph is not None:
+                add_edges(visualization, graph.points, graph.edges, (0, 0, 0))
 
         if self.overlay_points:
             if self.point_color == 0:
-                visualization = add_points(visualization, output['points'], output['labels'], point_size)
+                visualization = add_points(visualization, output['centers'][0], 0, point_size)
 
             elif self.point_color == 1:
-                visualization = add_points(visualization, output['points'], 3, point_size)
+                visualization = add_points(visualization, output['centers'][0], output['labels'][0], point_size)
 
             else:
                 raise RuntimeError()
 
-        if defects is not None:
-            for defect in defects:
-                polygon = defect['enclosing_path']
-                if self.overlay_outlines:
-                    # rectangles = [defect['bbox'] for defect in defects]
-                    # visualization = add_rectangles(visualization, rectangles, (255, 0, 0))
-                    visualization = add_polygons(visualization, [polygon], (255, 255, 0))
+        add_polygons(visualization, output['contours'][0], output['contour_labels'][0], thickness=3)
 
-                if self.tag == 1:
-                    add_text(visualization, defect['signature'], (np.min(polygon[:, 0]), np.max(polygon[:, 1])),
-                             (0, 0, 0))
+        # if defects is not None:
+        #     for defect in defects:
+        #         polygon = defect['enclosing_path']
+        #         if self.overlay_outlines:
+        #             # rectangles = [defect['bbox'] for defect in defects]
+        #             # visualization = add_rectangles(visualization, rectangles, (255, 0, 0))
+        #             visualization = add_polygons(visualization, [polygon], (255, 255, 0))
+        #
+        #         if self.tag == 1:
+        #             add_text(visualization, defect['signature'], (np.min(polygon[:, 0]), np.max(polygon[:, 1])),
+        #                      (0, 0, 0))
 
         return visualization
 
@@ -404,6 +406,7 @@ class StructureRecognitionPanelDelegate:
 
         logger_wrapper = LoggerWrapper(logger)
         logger_wrapper.logging_level = 1
+
         self.log_combo_box._widget.bind_current_index(Binding.PropertyBinding(logger_wrapper, 'logging_level'))
 
         run_row, self.run_push_button = push_button_template(ui, 'Start live analysis')
@@ -440,10 +443,10 @@ class StructureRecognitionPanelDelegate:
 
     def start_live_analysis(self):
         if self.get_camera() is None:
-            raise RuntimeError('Camera not found')
+            raise RuntimeError('structure recognition: camera not found')
 
         if not self.get_camera().is_playing:
-            raise RuntimeError('Camera not acquiring')
+            raise RuntimeError('structure recognition: camera not acquiring')
 
         self.run_push_button.text = 'Abort live analysis'
         self.stop_live_analysis_event = threading.Event()
@@ -457,17 +460,19 @@ class StructureRecognitionPanelDelegate:
         self.output_data_item = self.document_controller.library.create_data_item()
         self.output_data_item.title = 'Visualization of Live Analysis'
 
-        logger.info('Starting live analysis')
+        logger.info('structure recognition: starting live analysis')
         with self.api.library.data_ref_for_data_item(self.output_data_item) as data_ref:
 
             def thread_this(stop_live_analysis_event, camera, data_ref):
-                self.model = load_preset_model('graphene')
+                self.model = load_preset_model('hbn')
 
                 while not stop_live_analysis_event.is_set():
                     if not camera.is_playing:
                         self.stop_live_analysis()
 
-                    source_data = camera.grab_next_to_finish()  # TODO: This starts scanning? Must be a bug.
+                    #camera._hardware_source.stem_controller.change_stage_position(dx=0, dy=1e-9)
+
+                    source_data = camera.grab_next_to_finish()
                     image = source_data[0].data.copy()
 
                     try:
@@ -475,48 +480,45 @@ class StructureRecognitionPanelDelegate:
                             sampling = self.scale_section.calibrate(image, self.model)
                         else:
                             sampling = self.scale_section.sampling
-                    except Exception as e:
-                        logger.error('Calibration failed: {}'.format(str(e)))
+                    except Exception:
+                        logger.error('structure recognition: calibration failed', exc_info=True)
                         sampling = self.scale_section.sampling
 
                     if sampling is None:
-                        logger.error('Pixel size undefined')
+                        logger.error('structure recognition: pixel size is not defined - frame skipped')
                         continue
 
-                    logger.info('Using fov {:.3f} x {:.3f} Angstrom'.format(image.shape[0] * sampling,
-                                                                            image.shape[1] * sampling))
+                    logger.info((f'structure recognition: using fov {image.shape[0] * sampling:.3f} x '
+                                 f'{image.shape[1] * sampling:.3f} Å ({sampling:.5f} Å / pixel)'))
 
                     try:
-                        output = self.model(image, sampling, self.deep_learning_section.recurrent_normalize)
-                    except Exception as e:
-                        logger.error('Deep learning model failed: {}'.format(str(e)))
-                        continue
+                        output = self.model(image, sampling, return_aligned_maps=True)
+                    except Exception:
+                        logger.error(f'structure recognition: deep learning model failed',
+                                     exc_info=True)
 
-                    if output is None:
                         continue
 
                     try:
-                        graph = self.graph_section.build_graph(output['points'], output['labels'], sampling)
-                        defects = self.graph_section.analyze_defects(graph, sampling)
-                    except Exception as e:
-                        logger.error('Graph analysis failed: {}'.format(str(e)))
-                        defects = None
+                        graph = self.graph_section.build_graph(output['centers'][0])
+                    except Exception:
+                        logger.error(f'structure recognition: graph analysis failed', exc_info=True)
                         graph = None
 
                     try:
                         if output is not None:
                             visualization = self.visualization_section.create_visualization(image, sampling, output,
-                                                                                            graph, defects)
+                                                                                            graph)
 
                             def update_data_item():
                                 data_ref.data = visualization
 
                             self.api.queue_task(update_data_item)
 
-                    except Exception as e:
-                        logger.error('Creating visualization failed: {}'.format(str(e)))
+                    except Exception:
+                        logger.error('structure recognition: creating visualization failed', exc_info=True)
 
-                logger.info('Live analysis ended')
+                logger.info('structure recognition: live analysis ended')
 
             self.thread = threading.Thread(target=thread_this,
                                            args=(self.stop_live_analysis_event, self.get_camera(), data_ref))

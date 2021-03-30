@@ -52,10 +52,19 @@ def add_rectangles(image, rectangles, color, **kwargs):
     return image
 
 
-def add_polygons(image, polygons, color):
-    for polygon in polygons:
+def add_polygons(image, polygons, colors, thickness=3):
+    default_colors = get_default_colors()
+    array_colors = np.array(colors)
+
+    if isinstance(colors, int):
+        colors = [default_colors[colors]] * len(polygons)
+
+    elif (len(array_colors.shape) == 1) & (array_colors.shape[0] == len(polygons)):
+        colors = [default_colors[color] for color in colors]
+
+    for polygon, color in zip(polygons, colors):
         polygon = np.array(polygon).astype(np.int32)[:, None]
-        cv2.polylines(image, [polygon], True, color)
+        cv2.polylines(image, [polygon], True, color, thickness)
     return image
 
 
@@ -104,4 +113,5 @@ def array_to_uint8_image(array):
 
 def segmentation_to_uint8_image(segmentation):
     colors = np.array(get_default_colors(), dtype=np.uint8)
-    return colors[segmentation]
+    painted_segmentation = colors[segmentation]
+    return painted_segmentation
