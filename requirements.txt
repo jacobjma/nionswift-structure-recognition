@@ -7,3 +7,4 @@ matplotlib
 pytest
 numba
 scikit-image
+e2cnn
