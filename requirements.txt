@@ -2,7 +2,6 @@ numpy
 torch
 torchvision
 scipy
-opencv-python
 matplotlib
 pytest
 numba

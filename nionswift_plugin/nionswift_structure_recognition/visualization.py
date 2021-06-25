@@ -1,7 +1,9 @@
-import cv2
+# import cv2
 import matplotlib
 import matplotlib.colors as mcolors
 import numpy as np
+
+from skimage import draw
 
 
 def get_colors_from_cmap(c, cmap=None, vmin=None, vmax=None):
@@ -28,48 +30,46 @@ def get_colors_from_cmap(c, cmap=None, vmin=None, vmax=None):
     return colors
 
 
-def add_faces(points, faces, image, colors):
-    points = np.round(points).astype(int)
-    for face, color in zip(faces, colors):
-        cv2.fillConvexPoly(image, points[face][:, ::-1], tuple(map(int, color)))
-
-    return image
-
-
 def add_edges(image, points, edges, color, **kwargs):
     points = np.round(points).astype(int)
     for edge in edges:
-        cv2.line(image, tuple(points[edge[0]]), tuple(points[edge[1]]), color=color, **kwargs)
+        a, b = points[edge[0]], points[edge[1]]
+        try:
+            image[draw.line(a[1], a[0], b[1], b[0])] = color
+        except IndexError:
+            pass
 
     return image
 
 
 def add_rectangles(image, rectangles, color, **kwargs):
     for rectangle in rectangles:
-        cv2.rectangle(image,
-                      (int(rectangle[0, 0]), int(rectangle[1, 0])),
-                      (int(rectangle[0, 1]), int(rectangle[1, 1])), color=color, **kwargs)
+        image[draw.rectangle_perimeter((int(rectangle[0, 0]), int(rectangle[1, 0])),
+                                       (int(rectangle[0, 1]), int(rectangle[1, 1])),
+                                       shape=image.shape, clip=True)] = color
+
     return image
 
 
 def add_polygons(image, polygons, color):
     for polygon in polygons:
-        polygon = np.array(polygon).astype(np.int32)[:, None]
-        cv2.polylines(image, [polygon], True, color)
+        polygon = np.array(polygon).astype(np.int32)
+        image[draw.polygon_perimeter(polygon[:, 1], polygon[:, 0], shape=image.shape, clip=True)] = color
+
     return image
 
 
 def add_text(image, text, upper_left_corner, color):
-    (label_width, label_height), baseline = cv2.getTextSize(text, fontFace=cv2.FONT_HERSHEY_PLAIN, fontScale=1,
-                                                            thickness=1)
-    org = (int(upper_left_corner[0]), int(upper_left_corner[1]) + label_height)
-    _x1 = org[0]
-    _y1 = org[1]
-    _x2 = _x1 + label_width
-    _y2 = org[1] - label_height
-    image = cv2.rectangle(image, (_x1, _y1), (_x2, _y2), (255, 255, 255), cv2.FILLED)
-    image = cv2.putText(image, text, org=org, fontFace=cv2.FONT_HERSHEY_PLAIN, fontScale=1, color=color, thickness=1,
-                        lineType=0)
+    # (label_width, label_height), baseline = cv2.getTextSize(text, fontFace=cv2.FONT_HERSHEY_PLAIN, fontScale=1,
+    #                                                         thickness=1)
+    # org = (int(upper_left_corner[0]), int(upper_left_corner[1]) + label_height)
+    # _x1 = org[0]
+    # _y1 = org[1]
+    # _x2 = _x1 + label_width
+    # _y2 = org[1] - label_height
+    # image = cv2.rectangle(image, (_x1, _y1), (_x2, _y2), (255, 255, 255), cv2.FILLED)
+    # image = cv2.putText(image, text, org=org, fontFace=cv2.FONT_HERSHEY_PLAIN, fontScale=1, color=color, thickness=1,
+    #                     lineType=0)
     return image
 
 
@@ -92,7 +92,7 @@ def add_points(image, points, colors, size=4):
         colors = [default_colors[color] for color in colors]
 
     for point, color in zip(points, colors):
-        cv2.circle(image, (point[0], point[1]), size, color, -1)
+        image[draw.disk((point[1], point[0]), size, shape=image.shape)] = color
 
     return image
 
