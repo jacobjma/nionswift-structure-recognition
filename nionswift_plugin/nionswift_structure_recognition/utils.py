@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 
 
@@ -23,3 +25,13 @@ def labels_to_lists(labels, labelled):
     for i, indices in label_to_index_generator(labels):
         lists.append(labelled[indices])
     return lists
+
+
+def walk_dir(path, ending):
+    files = []
+    for r, d, f in os.walk(path):
+        for file in f:
+            if file[-len(ending):] == ending:
+                files.append(os.path.join(r, file))
+
+    return files

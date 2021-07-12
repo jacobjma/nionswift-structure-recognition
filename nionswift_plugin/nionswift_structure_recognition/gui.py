@@ -1,20 +1,19 @@
 import gettext
+import logging
 import threading
 
 import numpy as np
+from fourier_scale_calibration import FourierSpaceCalibrator
 from nion.utils import Binding, Event
-
-import warnings
-import logging
 
 from psm.geometry import regular_polygon
 from psm.graph import stable_delaunay_graph
 from psm.rmsd import pairwise_rmsd
+from psm.select import select_faces_around_nodes, select_nodes_in_faces
 from psm.structures.graphene import defect_fingerprint
 from psm.utils import flatten_list_of_lists
-from psm.select import select_faces_around_nodes, select_nodes_in_faces
 from .model import load_preset_model
-from .scale import FourierSpaceCalibrator, RealSpaceCalibrator
+from .scale import RealSpaceCalibrator
 from .visualization import add_points, array_to_uint8_image, segmentation_to_uint8_image, add_edges, add_polygons, \
     add_text
 
@@ -120,7 +119,8 @@ class DeepLearningSection(Section):
         self.recurrent_normalize = True
         self.recurrent_normalize_check_box._widget.bind_checked(Binding.PropertyBinding(self, 'recurrent_normalize'))
 
-        boundary_extrapolation_row, self.boundary_extrapolation_line_edit = line_edit_template(self._ui, 'Bondary extrapolation [Å]')
+        boundary_extrapolation_row, self.boundary_extrapolation_line_edit = line_edit_template(self._ui,
+                                                                                               'Bondary extrapolation [Å]')
         self.boundary_extrapolation_line_edit._widget._behavior.enabled = False
 
         self.column.add(model_row)
@@ -154,6 +154,10 @@ class ScaleDetectionSection(Section):
         self.max_sampling = .1
         self.max_sampling_line_edit._widget.bind_text(Binding.PropertyBinding(self, 'max_sampling'))
 
+        use_2nd_order_row, self.use_2nd_order_check_box = check_box_template(self._ui, 'Use 2nd order')
+        self.use_2nd_order = True
+        self.use_2nd_order_check_box._widget.bind_checked(Binding.PropertyBinding(self, 'use_2nd_order'))
+
         calibrate_next_row, self.calibrate_next_check_box = check_box_template(self._ui, 'Calibrate next acquisition')
         self.calibrate_next = True
         self.calibrate_next_check_box._widget.bind_checked(Binding.PropertyBinding(self, 'calibrate_next'))
@@ -163,6 +167,7 @@ class ScaleDetectionSection(Section):
         self.column.add(lattice_constant_row)
         self.column.add(min_sampling_row)
         self.column.add(max_sampling_row)
+        self.column.add(use_2nd_order_row)
         self.column.add(calibrate_next_row)
 
     def calibrate(self, image, model):
@@ -176,7 +181,16 @@ class ScaleDetectionSection(Section):
             raise RuntimeError()
 
         if self.space == 0:
-            self.calibrator = FourierSpaceCalibrator(template, lattice_constant, min_sampling, max_sampling)
+            if self.use_2nd_order:
+                self.calibrator = FourierSpaceCalibrator(template='2nd-order-hexagonal',
+                                                         lattice_constant=lattice_constant,
+                                                         min_sampling=min_sampling,
+                                                         max_sampling=max_sampling)
+            else:
+                self.calibrator = FourierSpaceCalibrator(template='hexagonal',
+                                                         lattice_constant=lattice_constant,
+                                                         min_sampling=min_sampling,
+                                                         max_sampling=max_sampling)
 
         elif self.space == 1:
             self.calibrator = RealSpaceCalibrator(model, template, lattice_constant, min_sampling, max_sampling)
@@ -487,7 +501,7 @@ class StructureRecognitionPanelDelegate:
                                                                             image.shape[1] * sampling))
 
                     try:
-                        output = self.model(image, sampling, self.deep_learning_section.recurrent_normalize)
+                        output = self.model(image, sampling)
                     except Exception as e:
                         logger.error('Deep learning model failed: {}'.format(str(e)))
                         continue
