@@ -1,6 +1,8 @@
 numpy
+
 torch
 torchvision
+
 scipy
 matplotlib
 pytest

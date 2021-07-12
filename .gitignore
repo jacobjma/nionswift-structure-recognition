@@ -1,2 +1,3 @@
 *.pyc
 .DS_Store
+nionswift_structure_recognition.egg-info

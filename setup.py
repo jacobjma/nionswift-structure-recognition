@@ -3,7 +3,7 @@ import os
 
 setuptools.setup(
     name="nionswift-structure-recognition",
-    version="0.1",
+    version="0.1.1",
     author="Jacob Madsen",
     author_email="jacob.madsen@univie.ac.at",
     description="Deep learning structure recognition of atomic resolution images",
