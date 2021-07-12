@@ -165,7 +165,7 @@ class AtomRecognitionModel:
 
         net.to(device)
         net.eval()
-        net.load_state_dict(torch.load(os.path.join(folder, state['net']['weights_file'])))
+        net.load_state_dict(torch.load(os.path.join(folder, state['net']['weights_file']), map_location=device))
 
         return cls(net,
                    train_sampling=state['train_sampling'],
