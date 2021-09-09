@@ -6,4 +6,4 @@ matplotlib
 pytest
 numba
 scikit-image
-e2cnn=1.7.0
+e2cnn==1.7.0
