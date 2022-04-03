@@ -13,7 +13,7 @@ from psm.select import select_faces_around_nodes, select_nodes_in_faces
 from psm.structures.graphene import defect_fingerprint
 from psm.utils import flatten_list_of_lists
 from .model import load_preset_model
-from .scale import RealSpaceCalibrator
+from .real_space_scale import RealSpaceCalibrator
 from .visualization import add_points, array_to_uint8_image, segmentation_to_uint8_image, add_edges, add_polygons, \
     add_text
 
