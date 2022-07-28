@@ -15,7 +15,6 @@ setuptools.setup(
         'scipy',
         'matplotlib',
         'pytest',
-        'numba',
         'scikit-image',
         'e2cnn'],
     include_package_data=True,

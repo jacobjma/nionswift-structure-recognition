@@ -3,6 +3,5 @@ torch
 scipy
 matplotlib
 pytest
-numba
 scikit-image
 e2cnn==0.1.7
