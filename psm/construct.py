@@ -34,8 +34,7 @@ def triangle_angles(p, r, q):
 
 
 def delaunay_simplex_distance_metrics(points, simplices, neighbors):
-    print(neighbors)
-    angles, side_lengths = triangle_angles(points[simplices[:, 0]], points[simplices[:, 1]], points[simplices[:, 2]])
+    angles = triangle_angles(points[simplices[:, 0]], points[simplices[:, 1]], points[simplices[:, 2]])
     alpha = np.zeros(len(neighbors) * 6, dtype=np.float64)
     row_ind = np.zeros(len(neighbors) * 6, dtype=np.int32)
     col_ind = np.zeros(len(neighbors) * 6, dtype=np.int32)
@@ -112,7 +111,7 @@ def stable_delaunay_faces(points, alpha_threshold, r_threshold=np.inf):
 
     alpha, (row_ind, col_ind) = delaunay_simplex_distance_metrics(points, simplices, neighbors)
 
-    connected = (alpha > alpha_threshold) + (r > r_threshold)
+    connected = alpha > alpha_threshold
 
     row_ind = row_ind[connected]
     col_ind = col_ind[connected]
