@@ -8,10 +8,8 @@ from .utils import generate_indices, labels_to_lists
 from .representation import adjacency_to_matrix
 
 
-@nb.njit
 def triangle_angles(p, r, q):
     angles = np.zeros((len(p), 3))
-    side_lenghts = np.zeros((len(p), 3))
 
     a2 = np.sum((r - q) ** 2, axis=1)
     b2 = np.sum((q - p) ** 2, axis=1)
@@ -20,10 +18,6 @@ def triangle_angles(p, r, q):
     a = np.sqrt(a2)
     b = np.sqrt(b2)
     c = np.sqrt(c2)
-
-    side_lenghts[:, 0] = a
-    side_lenghts[:, 1] = b
-    side_lenghts[:, 2] = c
 
     A = (b2 + c2 - a2) / (2 * b * c)
     A[A > 1] = 1
@@ -36,14 +30,13 @@ def triangle_angles(p, r, q):
     angles[:, 1] = np.arccos(B)
 
     angles[:, 2] = np.pi - angles[:, 0] - angles[:, 1]
-    return angles, side_lenghts
+    return angles
 
 
-@nb.njit
 def delaunay_simplex_distance_metrics(points, simplices, neighbors):
+    print(neighbors)
     angles, side_lengths = triangle_angles(points[simplices[:, 0]], points[simplices[:, 1]], points[simplices[:, 2]])
     alpha = np.zeros(len(neighbors) * 6, dtype=np.float64)
-    r = np.zeros(len(neighbors) * 6, dtype=np.float64)
     row_ind = np.zeros(len(neighbors) * 6, dtype=np.int32)
     col_ind = np.zeros(len(neighbors) * 6, dtype=np.int32)
 
@@ -58,7 +51,6 @@ def delaunay_simplex_distance_metrics(points, simplices, neighbors):
                 col_ind[l + 1] = i
 
                 alpha[l] = alpha[l + 1] = angles[i][j]
-                r[l] = r[l + 1] = side_lengths[i][j]
 
             else:
                 row_ind[l] = i
@@ -71,13 +63,11 @@ def delaunay_simplex_distance_metrics(points, simplices, neighbors):
                         break
 
                 alpha[l] = alpha[l + 1] = angles[i][j] + angles[k][m]
-                r[l] = r[l + 1] = side_lengths[i][j]
             l += 2
 
-    return alpha, r, (row_ind, col_ind)
+    return alpha, (row_ind, col_ind)
 
 
-@nb.njit
 def directed_simplex_edges(simplices):
     edges = np.zeros((len(simplices) * 3, 2), dtype=np.int64)
     k = 0
@@ -90,12 +80,8 @@ def directed_simplex_edges(simplices):
     return edges[:k]
 
 
-@nb.njit
 def order_exterior_vertices(edges):
-    boundary = nb.typed.Dict.empty(
-        key_type=nb.types.int64,
-        value_type=nb.types.int64,
-    )
+    boundary = dict()
 
     for i in range(len(edges)):
         edge = edges[i]
@@ -124,7 +110,7 @@ def stable_delaunay_faces(points, alpha_threshold, r_threshold=np.inf):
     neighbors = delaunay.neighbors
     delaunay.close()
 
-    alpha, r, (row_ind, col_ind) = delaunay_simplex_distance_metrics(points, simplices, neighbors)
+    alpha, (row_ind, col_ind) = delaunay_simplex_distance_metrics(points, simplices, neighbors)
 
     connected = (alpha > alpha_threshold) + (r > r_threshold)
 

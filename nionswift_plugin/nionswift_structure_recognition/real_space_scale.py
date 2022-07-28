@@ -147,7 +147,7 @@ class RealSpaceCalibrator:
         :param max_sampling: float
             The maximum sampling of the sweep [Ångstrom / pixel].
         :param step_size: float
-            The step size of the sweep [Ångstrom / pixel]. Default is 0.1.
+            The step size of the sweep [Ångstrom / pixel]. Default is 0.01.
         :param binning: int
             Optional binning of the image prior to calculating predictions with the neural network. This will improve
             the speed of the predictions.

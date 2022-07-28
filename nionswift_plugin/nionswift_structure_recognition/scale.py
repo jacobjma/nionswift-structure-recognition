@@ -168,6 +168,9 @@ class RealSpaceCalibrator:
 
     def __call__(self, image):
 
+        if image.shape[-1] == 3:
+            image = image[..., 0]
+
         if self.template.lower() == 'hexagonal':
             template = regular_polygon(self.lattice_constant / np.sqrt(3), 6)
             alpha = 2.

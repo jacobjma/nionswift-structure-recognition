@@ -1,4 +1,3 @@
-import numba as nb
 import numpy as np
 
 
@@ -18,7 +17,6 @@ def rmsd_kabsch(p, q):
     return np.sqrt(np.sum((rotated - q) ** 2) / len(p))
 
 
-@nb.njit
 def rmsd_qcp(src, dst):
     M = np.dot(dst.T, src)
 
@@ -44,7 +42,6 @@ def rmsd_qcp(src, dst):
 
 
 def pairwise_rmsd(A, B, A_labels=None, B_labels=None, transform='rigid', scale_invariant=True, pivot='cop'):
-
     if A_labels is not None:
         if len(A_labels) != len(A):
             raise RuntimeError()
