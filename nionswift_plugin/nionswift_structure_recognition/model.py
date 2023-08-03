@@ -101,7 +101,7 @@ def is_position_inside_image(positions, shape, margin=0.):
 def mask_image(image, contours):
     masked_image = image.copy()
 
-    mask = np.zeros(masked_image.shape, dtype=np.bool)
+    mask = np.zeros(masked_image.shape, dtype=np.bool_)
     for contour in contours:
         mask += polygon2mask(masked_image.shape, contour[:, ::-1])
 
@@ -275,10 +275,10 @@ class AtomRecognitionModel:
 
     def _merge_positions(self, lattice_positions, contaminant_positions):
         if len(contaminant_positions) == 0:
-            return lattice_positions, np.zeros(len(lattice_positions), dtype=np.int)
+            return lattice_positions, np.zeros(len(lattice_positions), dtype=np.int_)
 
         if len(lattice_positions) == 0:
-            return contaminant_positions, np.ones(len(lattice_positions), dtype=np.int)
+            return contaminant_positions, np.ones(len(lattice_positions), dtype=np.int_)
 
         distances, overlapping_atoms = KDTree(lattice_positions).query(contaminant_positions, 1)
         # overlapping_atoms = overlapping_atoms[distances < self._mean_bondlength / self.train_sampling * .5]
@@ -292,7 +292,7 @@ class AtomRecognitionModel:
         lattice_positions = np.delete(lattice_positions, overlapping_atoms, axis=0)
         positions = np.vstack([lattice_positions, contaminant_positions])
 
-        labels = np.zeros(len(positions), dtype=np.int)
+        labels = np.zeros(len(positions), dtype=np.int_)
         labels[-len(contaminant_positions):] = 1
         return positions, labels
 
@@ -308,7 +308,7 @@ class AtomRecognitionModel:
 
             positions, labels = self._merge_positions(lattice_positions, contaminant_positions)
 
-            valid = np.ones(len(positions), dtype=np.bool)
+            valid = np.ones(len(positions), dtype=np.bool_)
             for contour in contours:
                 valid[[mplPath.Path(contour).contains_point(position) for position in positions]] = False
 
